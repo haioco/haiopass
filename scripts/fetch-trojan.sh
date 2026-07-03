@@ -33,22 +33,18 @@ for binary_name in "${!TARGETS[@]}"; do
   curl -fsSL -o "$zip_path" "$url"
 
   echo "Extracting $asset to $DEST ..."
-  cd "$DEST"
-  unzip -o "$zip_path" 2>/dev/null || true
-  cd - >/dev/null
+  unzip -o "$zip_path" -d "$DEST" 2>/dev/null || true
 
-  # The zip might extract the binary with a different name or path
-  # Find any extracted file that looks like trojan-go
-  find /tmp -maxdepth 2 -name "trojan-go*" -newer "$zip_path" -exec cp {} "$dest_path" \; 2>/dev/null || true
-
-  # Also check current dir and DEST for extracted files
+  # The zip might extract the binary with a different name (e.g. "trojan-go")
+  # Rename it to the expected platform-specific name
   if [ -f "$DEST/trojan-go" ]; then
     if [[ "$binary_name" == *windows* ]]; then
       mv "$DEST/trojan-go" "$DEST/trojan-go-windows-amd64.exe"
     else
-      # Deduplicate - keep the correct name
       if [ ! -f "$dest_path" ]; then
-        cp "$DEST/trojan-go" "$dest_path"
+        mv "$DEST/trojan-go" "$dest_path"
+      else
+        rm "$DEST/trojan-go"
       fi
     fi
   fi

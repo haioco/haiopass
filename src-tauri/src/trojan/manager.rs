@@ -11,7 +11,6 @@ pub struct TrojanManager {
     binary_path: PathBuf,
     config_path: PathBuf,
     log_path: PathBuf,
-    stopped: bool,
 }
 
 impl Default for TrojanManager {
@@ -29,7 +28,6 @@ impl TrojanManager {
             binary_path: config_dir.join(format!("{}{}", TROJAN_BINARY, ext)),
             config_path: config_dir.join("config.json"),
             log_path: config_dir.join("trojan.log"),
-            stopped: false,
         }
     }
 
@@ -41,7 +39,7 @@ impl TrojanManager {
         #[cfg(not(windows))]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&self.binary_path, std::fs::Permissions::from_mode(0o755))?;
+            tokio::fs::set_permissions(&self.binary_path, std::fs::Permissions::from_mode(0o755)).await?;
         }
         tracing::info!("Extracted trojan-go to {}", self.binary_path.display());
         Ok(())
@@ -75,14 +73,13 @@ impl TrojanManager {
         let child = cmd.spawn().map_err(|e| crate::error::HaioError::Trojan(format!("Failed to start: {}", e)))?;
         tracing::info!("Started trojan-go pid {:?}", child.id());
         self.child = Some(child);
-        self.stopped = false;
         Ok(())
     }
 
     pub async fn stop(&mut self) -> crate::error::Result<()> {
-        self.stopped = true;
         if let Some(mut child) = self.child.take() {
             let _ = child.kill().await;
+            let _ = child.wait().await;
             tracing::info!("Stopped trojan-go");
         }
         Ok(())

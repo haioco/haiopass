@@ -26,12 +26,21 @@ pub async fn enable_proxy(
 
     // 2. Start trojan-go first — wait for SOCKS5 port
     {
-        let mut trojan = state.trojan.write().await;
-        let config = state.config.read().await;
-        if let Some(ref tc) = config.get().trojan_config {
-            trojan.start(tc.clone(), port).await.map_err(|e| e.to_string())?;
+        let tc = {
+            let config = state.config.read().await;
+            config.get().trojan_config.clone()
+        };
+        if let Some(tc) = tc {
+            let mut trojan = state.trojan.write().await;
+            trojan.start(tc, port).await.map_err(|e| e.to_string())?;
         }
-        drop(config);
+    }
+
+    // Emit trojan status
+    {
+        let mut trojan = state.trojan.write().await;
+        let (running, pid) = trojan.status();
+        crate::app::events::emit_trojan_status(&app_handle, running, pid).await;
     }
 
     // Wait for SOCKS5 port to become available
@@ -135,6 +144,7 @@ pub async fn disable_proxy(
         let mut trojan = state.trojan.write().await;
         trojan.stop().await.map_err(|e| e.to_string())?;
     }
+    crate::app::events::emit_trojan_status(&app_handle, false, None).await;
 
     // Remove sentinel
     remove_sentinel();
@@ -231,18 +241,30 @@ pub async fn set_state(
 
 #[tauri::command]
 pub async fn install_and_start_trojan(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, std::sync::Arc<AppState>>,
 ) -> Result<serde_json::Value, String> {
-    let mut trojan = state.trojan.write().await;
-    trojan.ensure_binary().await.map_err(|e| e.to_string())?;
+    let tc = {
+        let config = state.config.read().await;
+        config.get().trojan_config.clone()
+    };
+    let tc = tc.ok_or("No trojan config saved. Save a config first.")?;
+    let port = {
+        let config = state.config.read().await;
+        config.get().proxy_port
+    };
 
-    let config = state.config.read().await;
-    let port = config.get().proxy_port;
-    if let Some(ref tc) = config.get().trojan_config {
-        trojan.start(tc.clone(), port).await.map_err(|e| e.to_string())?;
-    } else {
-        return Err("No trojan config saved. Save a config first.".into());
+    {
+        let mut trojan = state.trojan.write().await;
+        trojan.ensure_binary().await.map_err(|e| e.to_string())?;
+        trojan.start(tc, port).await.map_err(|e| e.to_string())?;
     }
+
+    let (running, pid) = {
+        let mut trojan = state.trojan.write().await;
+        trojan.status()
+    };
+    crate::app::events::emit_trojan_status(&app_handle, running, pid).await;
 
     Ok(serde_json::json!({ "success": true }))
 }
