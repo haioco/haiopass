@@ -27,10 +27,10 @@ pub fn apply(addr: &str) -> crate::error::Result<()> {
     ];
 
     for prop in &props {
-        if let Some(pos) = content.find(prop) {
-            let line_start = content.rfind('\n').map(|p| p + 1).unwrap_or(0);
+        while let Some(pos) = content.find(prop) {
+            let line_start = content[..pos].rfind('\n').map(|p| p + 1).unwrap_or(0);
             let line_end = content[pos..].find('\n').map(|p| pos + p).unwrap_or(content.len());
-            content = format!("{}{}{}", &content[..line_start], "", &content[line_end..]);
+            content = format!("{}{}", &content[..line_start], &content[line_end..]);
         }
     }
 
@@ -61,7 +61,11 @@ pub fn clear() -> crate::error::Result<()> {
         let content = fs::read_to_string(&path)?;
         let filtered: String = content
             .lines()
-            .filter(|line| !line.starts_with("systemProp.http.proxy") && !line.starts_with("systemProp.https.proxy") && !line.starts_with("systemProp.http.nonProxyHosts"))
+            .filter(|line| {
+                !line.starts_with("systemProp.http.proxy")
+                    && !line.starts_with("systemProp.https.proxy")
+                    && !line.starts_with("systemProp.http.nonProxyHosts")
+            })
             .collect::<Vec<_>>()
             .join("\n");
         fs::write(&path, filtered)?;

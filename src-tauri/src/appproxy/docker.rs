@@ -22,13 +22,17 @@ pub fn apply(addr: &str) -> crate::error::Result<()> {
         serde_json::json!({})
     };
 
-    let proxies = serde_json::json!({
-        "default": {
-            "httpProxy": format!("http://{}", addr),
-            "httpsProxy": format!("http://{}", addr),
-            "noProxy": "localhost,127.0.0.1"
-        }
+    let mut proxies = config.get("proxies").cloned().unwrap_or(serde_json::json!({}));
+
+    let default_proxy = serde_json::json!({
+        "httpProxy": format!("http://{}", addr),
+        "httpsProxy": format!("http://{}", addr),
+        "noProxy": "localhost,127.0.0.1"
     });
+
+    if let Some(obj) = proxies.as_object_mut() {
+        obj.insert("default".into(), default_proxy);
+    }
 
     config["proxies"] = proxies;
 
@@ -43,7 +47,14 @@ pub fn clear() -> crate::error::Result<()> {
     let path = docker_config_path();
     if path.exists() {
         let mut config: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
-        config.as_object_mut().map(|o| o.remove("proxies"));
+        if let Some(proxies) = config.get_mut("proxies") {
+            if let Some(obj) = proxies.as_object_mut() {
+                obj.remove("default");
+                if obj.is_empty() {
+                    config.as_object_mut().map(|o| o.remove("proxies"));
+                }
+            }
+        }
         fs::write(&path, serde_json::to_string_pretty(&config)?)?;
     }
     Ok(())

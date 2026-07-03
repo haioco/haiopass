@@ -6,11 +6,8 @@ const autostartToggle = document.getElementById('autostartToggle');
 export const PRESET_LABELS = {
   gradle: 'Gradle (Android Studio)',
   maven: 'Maven',
-  npm: 'npm',
   pip: 'pip (Python)',
-  git: 'git',
   docker: 'Docker',
-  go: 'Go (GOPROXY)',
   curl: 'curl',
 };
 

@@ -8,6 +8,7 @@ const saveConfigBtn = document.getElementById('saveConfigBtn');
 const toggle        = document.getElementById('proxyToggle');
 const toggleTitle   = document.getElementById('toggleTitle');
 const domainCount   = document.getElementById('domainCount');
+const domainMeta    = document.getElementById('domainMeta');
 const statusBadge   = document.getElementById('statusBadge');
 const portInput     = document.getElementById('portInput');
 const errorMsg      = document.getElementById('errorMsg');
@@ -24,6 +25,8 @@ const trojanStatus   = document.getElementById('trojanStatus');
 const trojanStatusText = document.getElementById('trojanStatusText');
 
 let currentLang = 'en';
+let lastRefreshTime = 0;
+let domainSourceUrl = '';
 
 function setLanguage(lang) {
   currentLang = lang;
@@ -76,6 +79,12 @@ function setConn(state, text) {
   connStatus.className = 'conn-status ' + state;
 }
 
+function formatTimestamp(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  return d.toLocaleString();
+}
+
 async function runHealthCheck() {
   const t = translations[currentLang];
   setConn('checking', t.checking);
@@ -106,6 +115,33 @@ function setConfigStatus(msg, ok) {
   configStatus.className = 'config-status ' + (ok === true ? 'ok' : ok === false ? 'bad' : '');
 }
 
+function updateDomainMeta(data) {
+  const t = translations[currentLang];
+  let html = '';
+
+  if (data.domainSourceUrl) {
+    domainSourceUrl = data.domainSourceUrl;
+    html += `<span class="domain-link-wrap"><a class="domain-link" href="#">${t.domainsLink}</a></span>`;
+  }
+
+  if (data.lastFetch) {
+    const timeStr = formatTimestamp(data.lastFetch);
+    html += `<span class="domain-fetch-time">${t.lastFetch}: ${timeStr}</span>`;
+  }
+
+  domainMeta.innerHTML = html;
+
+  const linkEl = domainMeta.querySelector('.domain-link');
+  if (linkEl) {
+    linkEl.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (window.__TAURI__?.shell?.open) {
+        window.__TAURI__.shell.open(domainSourceUrl);
+      }
+    });
+  }
+}
+
 async function loadStatus() {
   const data = await invoke('get_status');
   const t = translations[currentLang];
@@ -123,8 +159,10 @@ async function loadStatus() {
     } else {
       domainCount.textContent = `${data.domainCount} ${t.domainsProxied}`;
     }
+    updateDomainMeta(data);
   } else {
     domainCount.textContent = '';
+    domainMeta.innerHTML = '';
   }
 
   if (data.lastFetchError && (data.usingFallback || data.usingCache)) {
@@ -238,6 +276,42 @@ btnSetup.addEventListener('click', async () => {
     showError(res.error || 'Install failed');
   }
 });
+
+const btnRefreshDomains = document.getElementById('btnRefreshDomains');
+if (btnRefreshDomains) {
+  btnRefreshDomains.addEventListener('click', async () => {
+    const now = Date.now();
+    if (now - lastRefreshTime < 10000) {
+      const remaining = Math.ceil((10000 - (now - lastRefreshTime)) / 1000);
+      btnRefreshDomains.textContent = `${remaining}s`;
+      return;
+    }
+
+    lastRefreshTime = now;
+    btnRefreshDomains.disabled = true;
+    btnRefreshDomains.classList.add('refreshing');
+
+    const countdownInterval = setInterval(() => {
+      const elapsed = Date.now() - lastRefreshTime;
+      const remaining = Math.ceil((10000 - elapsed) / 1000);
+      if (remaining > 0) {
+        btnRefreshDomains.textContent = `${remaining}s`;
+      } else {
+        clearInterval(countdownInterval);
+        btnRefreshDomains.textContent = translations[currentLang].refreshDomains;
+        btnRefreshDomains.disabled = false;
+        btnRefreshDomains.classList.remove('refreshing');
+      }
+    }, 500);
+
+    try {
+      await invoke('refresh_domains');
+      await loadStatus();
+    } catch (e) {
+      showError(String(e) || 'Refresh failed');
+    }
+  });
+}
 
 // Listen for events from backend
 listen('status:update', (data) => {

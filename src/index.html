@@ -43,6 +43,7 @@
         <div class="toggle-info">
           <span class="toggle-title" id="toggleTitle" data-i18n="proxyDisabled">Proxy Disabled</span>
           <small class="toggle-sub" id="domainCount"></small>
+          <div class="domain-meta" id="domainMeta"></div>
         </div>
         <label class="switch">
           <input type="checkbox" id="proxyToggle" />
@@ -56,6 +57,11 @@
       </div>
 
       <div id="errorMsg" class="error-msg hidden"></div>
+
+      <!-- Domain refresh bar -->
+      <div class="domain-bar" id="domainBar">
+        <button class="btn-refresh" id="btnRefreshDomains" data-i18n="refreshDomains">Refresh domains</button>
+      </div>
 
       <!-- Trojan setup -->
       <div class="card setup-card" id="setupCard">
@@ -88,7 +94,7 @@
     <div class="settings-panel hidden" id="settingsPanel">
       <div class="settings-header">
         <span class="card-label" data-i18n="devToolPresets">Dev Tool Proxy Presets</span>
-        <button class="btn-back" id="btnBack">← Back</button>
+        <button class="btn-back" id="btnBack">&larr; Back</button>
       </div>
       <div class="presets-list" id="presetsList"></div>
       <div class="settings-footer">

@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Default capability set",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open"
+  ]
+}

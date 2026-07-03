@@ -1,16 +1,13 @@
 pub mod gradle;
 pub mod maven;
-pub mod npm;
 pub mod pip;
-pub mod git;
 pub mod docker;
-pub mod goproxy;
 pub mod curl;
 pub mod detect;
 
 use std::collections::HashMap;
 
-const ALL_PRESETS: &[&str] = &["gradle", "maven", "npm", "pip", "git", "docker", "go", "curl"];
+const ALL_PRESETS: &[&str] = &["gradle", "maven", "pip", "docker", "curl"];
 
 pub struct AppProxyRegistry {
     backups: HashMap<String, String>,
@@ -56,24 +53,15 @@ impl AppProxyRegistry {
                 self.backups.insert("maven".into(), backup);
                 maven::apply(addr)?;
             }
-            "npm" => {
-                npm::apply(addr)?;
-            }
             "pip" => {
                 let backup = pip::get_current()?;
                 self.backups.insert("pip".into(), backup);
                 pip::apply(addr)?;
             }
-            "git" => {
-                git::apply(addr)?;
-            }
             "docker" => {
                 let backup = docker::get_current()?;
                 self.backups.insert("docker".into(), backup);
                 docker::apply(addr)?;
-            }
-            "go" => {
-                goproxy::apply(addr)?;
             }
             "curl" => {
                 let backup = curl::get_current()?;
@@ -112,7 +100,6 @@ impl AppProxyRegistry {
                     maven::clear()?;
                 }
             }
-            "npm" => npm::clear()?,
             "pip" => {
                 if let Some(backup) = self.backups.remove("pip") {
                     pip::restore(&backup)?;
@@ -120,7 +107,6 @@ impl AppProxyRegistry {
                     pip::clear()?;
                 }
             }
-            "git" => git::clear()?,
             "docker" => {
                 if let Some(backup) = self.backups.remove("docker") {
                     docker::restore(&backup)?;
@@ -128,7 +114,6 @@ impl AppProxyRegistry {
                     docker::clear()?;
                 }
             }
-            "go" => goproxy::clear()?,
             "curl" => {
                 if let Some(backup) = self.backups.remove("curl") {
                     curl::restore(&backup)?;

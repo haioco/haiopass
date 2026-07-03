@@ -68,6 +68,24 @@ header { display: flex; align-items: center; justify-content: space-between; }
 .toggle-info { display: flex; flex-direction: column; gap: 3px; }
 .toggle-title { font-size: 14px; font-weight: 700; color: #1e293b; }
 .toggle-sub { font-size: 11px; color: #64748b; min-height: 14px; }
+.domain-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.domain-link {
+  font-size: 11px; color: #667eea; text-decoration: none; font-weight: 500;
+  border-bottom: 1px dashed rgba(102,126,234,0.4); transition: color 0.2s;
+}
+.domain-link:hover { color: #764ba2; border-bottom-color: #764ba2; }
+.domain-fetch-time { font-size: 10px; color: #94a3b8; }
+.domain-bar {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+}
+.btn-refresh {
+  background: #f1f5f9; border: 1px solid #e2e8f0; color: #64748b; padding: 4px 12px;
+  border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 600;
+  transition: all 0.2s;
+}
+.btn-refresh:hover { background: #e2e8f0; color: #1e293b; }
+.btn-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-refresh.refreshing { color: #3b82f6; }
 
 /* Toggle Switch */
 .switch { position: relative; width: 50px; height: 27px; flex-shrink: 0; }

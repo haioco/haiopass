@@ -50,6 +50,8 @@ pub fn apply(addr: &str) -> crate::error::Result<()> {
         host, port, host, port
     );
 
+    let content = remove_haio_proxies(&content);
+
     let content = if content.contains("<proxies>") {
         content.replace("<proxies>", &format!("<proxies>\n{}", proxy_xml))
     } else {
@@ -67,28 +69,28 @@ pub fn clear() -> crate::error::Result<()> {
     let path = maven_path();
     if path.exists() {
         let content = fs::read_to_string(&path)?;
-        let content = content.replace(
-            "<proxies>\n    <proxy>\n      <id>haio-http",
-            "<proxies>\n    <proxy>\n      <id>haio-http-REMOVE",
-        );
-        // Remove HAIO proxy blocks
-        let lines: Vec<&str> = content.lines().collect();
-        let mut filtered = Vec::new();
-        let mut skip = false;
-        for line in &lines {
-            if line.contains("<id>haio-http</id>") || line.contains("<id>haio-https</id>") {
-                skip = true;
-            }
-            if !skip {
-                filtered.push(*line);
-            }
-            if line.contains("</proxy>") {
-                skip = false;
-            }
-        }
-        fs::write(&path, filtered.join("\n"))?;
+        let content = remove_haio_proxies(&content);
+        fs::write(&path, content)?;
     }
     Ok(())
+}
+
+fn remove_haio_proxies(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut filtered = Vec::new();
+    let mut skip = false;
+    for line in &lines {
+        if line.contains("<id>haio-http</id>") || line.contains("<id>haio-https</id>") {
+            skip = true;
+        }
+        if !skip {
+            filtered.push(*line);
+        }
+        if line.contains("</proxy>") {
+            skip = false;
+        }
+    }
+    filtered.join("\n")
 }
 
 pub fn restore(backup: &str) -> crate::error::Result<()> {

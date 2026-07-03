@@ -20,17 +20,22 @@ pub fn get_current() -> crate::error::Result<String> {
 pub fn apply(addr: &str) -> crate::error::Result<()> {
     let path = pip_conf_path();
     let content = if path.exists() { fs::read_to_string(&path)? } else {
-        "[global]\n".to_string()
+        String::new()
     };
 
     let filtered: String = content
         .lines()
-        .filter(|line| !line.starts_with("proxy") && !line.starts_with("http_proxy"))
+        .filter(|line| !line.starts_with("proxy=") && !line.starts_with("http_proxy="))
         .collect::<Vec<_>>()
         .join("\n");
 
     let mut final_content = filtered.trim_end().to_string();
-    final_content.push_str(&format!("\nproxy=http://{}\n", addr));
+
+    if !final_content.contains("[global]") {
+        final_content.push_str("\n[global]\n");
+    }
+
+    final_content.push_str(&format!("proxy=http://{}\n", addr));
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -45,7 +50,7 @@ pub fn clear() -> crate::error::Result<()> {
         let content = fs::read_to_string(&path)?;
         let filtered: String = content
             .lines()
-            .filter(|line| !line.starts_with("proxy") && !line.starts_with("http_proxy"))
+            .filter(|line| !line.starts_with("proxy=") && !line.starts_with("http_proxy="))
             .collect::<Vec<_>>()
             .join("\n");
         fs::write(&path, filtered)?;

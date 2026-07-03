@@ -160,6 +160,7 @@ pub async fn get_status(
     Ok(serde_json::json!({
         "enabled": s.enabled,
         "domainCount": s.cached_domains.len(),
+        "domains": s.cached_domains,
         "proxyPort": s.proxy_port,
         "httpProxyPort": s.http_proxy_port,
         "lastFetch": s.last_fetch,
@@ -168,6 +169,7 @@ pub async fn get_status(
         "lastFetchError": s.last_fetch_error,
         "enabledPresets": s.enabled_presets,
         "autostart": s.autostart,
+        "domainSourceUrl": crate::domains::fallback::DOMAINS_URLS[0],
     }))
 }
 

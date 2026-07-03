@@ -16,6 +16,7 @@ pub struct TrojanConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct State {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
@@ -64,7 +65,7 @@ impl Default for State {
             using_fallback: false,
             using_cache: false,
             last_fetch_error: None,
-            enabled_presets: vec!["gradle".into(), "git".into()],
+            enabled_presets: vec!["gradle".into()],
             autostart: false,
             minimize_to_tray: true,
         }
