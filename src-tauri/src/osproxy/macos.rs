@@ -1,10 +1,13 @@
 use std::process::Command;
 
 fn get_active_services() -> Vec<String> {
-    let output = Command::new("networksetup")
+    let output = match Command::new("networksetup")
         .arg("-listallnetworkservices")
         .output()
-        .unwrap_or_default();
+    {
+        Ok(o) => o,
+        Err(_) => return Vec::new(),
+    };
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .skip(1) // skip header
