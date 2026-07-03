@@ -55,7 +55,7 @@ jobs:
           projectPath: .
           args: --target ${{ matrix.target }}
           tagName: ${{ github.ref_name }}
-          releaseName: 'HaioBypass v__VERSION__'
+          releaseName: 'HaioBypass ${{ github.ref_name }}'
           releaseBody: 'See the assets to download this version.'
           releaseDraft: true
           prerelease: false
