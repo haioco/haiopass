@@ -16,16 +16,12 @@ jobs:
         include:
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            bundles: deb,appimage
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            bundles: nsis,msi
           - platform: macos-latest
             target: aarch64-apple-darwin
-            bundles: dmg,app
           - platform: macos-latest
             target: x86_64-apple-darwin
-            bundles: dmg,app
 
     runs-on: ${{ matrix.platform }}
 
@@ -55,12 +51,16 @@ jobs:
         run: cargo install tauri-cli --version "^2"
 
       - name: Build Tauri app
-        run: cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+        run: cargo tauri build --target ${{ matrix.target }}
 
-      - name: List bundle output
+      - name: Debug build output
         if: always()
         shell: bash
-        run: find src-tauri/target/${{ matrix.target }}/release/bundle -type f 2>/dev/null || echo "No bundle directory found"
+        run: |
+          echo "=== Build directory ==="
+          ls -la src-tauri/target/${{ matrix.target }}/release/bundle/ 2>/dev/null || echo "bundle dir missing"
+          echo "=== Binary ==="
+          ls -la src-tauri/target/${{ matrix.target }}/release/haio-bypass* 2>/dev/null || echo "binary missing"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
