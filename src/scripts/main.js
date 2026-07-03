@@ -180,9 +180,9 @@ async function loadStatus() {
 
 async function loadConfig() {
   const state = await invoke('get_state');
-  if (state.trojan_url) {
-    configInput.value = state.trojan_url;
-    const parsed = parseTrojanUrl(state.trojan_url);
+  if (state.trojanUrl) {
+    configInput.value = state.trojanUrl;
+    const parsed = parseTrojanUrl(state.trojanUrl);
     if (parsed) {
       setConfigStatus(`\u2713 ${parsed.server}:${parsed.port}`, true);
       configOnlyCard.classList.add('hidden');
