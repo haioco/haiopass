@@ -112,7 +112,7 @@ async fn handle_connection(
     // Handle PAC request
     if request_line.starts_with("GET /pac.js") {
         let domains = router.get_domains().await;
-        let pac_script = pac::build_pac_script(&domains, pac_port);
+        let pac_script = pac::build_pac_script(&domains, pac_port, router.socks_port());
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/x-ns-proxy-autoconfig\r\nContent-Length: {}\r\n\r\n{}",
             pac_script.len(),

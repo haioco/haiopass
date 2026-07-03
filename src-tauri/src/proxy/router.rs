@@ -64,6 +64,10 @@ impl DomainRouter {
         format!("127.0.0.1:{}", self.socks_port)
     }
 
+    pub fn socks_port(&self) -> u16 {
+        self.socks_port
+    }
+
     pub async fn get_domains(&self) -> Vec<String> {
         let domains = self.domains.read().await;
         let mut list: Vec<String> = domains.iter().cloned().collect();
