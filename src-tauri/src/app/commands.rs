@@ -382,6 +382,11 @@ pub async fn check_for_updates(
 pub async fn quit_and_restore(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
 ) -> Result<serde_json::Value, String> {
+    quit_and_cleanup(state.inner().clone()).await?;
+    Ok(serde_json::json!({ "success": true }))
+}
+
+pub async fn quit_and_cleanup(state: std::sync::Arc<AppState>) -> Result<(), String> {
     let mut os_proxy = state.os_proxy.write().await;
     os_proxy.restore().await.map_err(|e| e.to_string())?;
 
@@ -393,7 +398,7 @@ pub async fn quit_and_restore(
 
     remove_sentinel();
 
-    Ok(serde_json::json!({ "success": true }))
+    Ok(())
 }
 
 // --- Helper functions ---

@@ -55,12 +55,16 @@ impl OsProxy {
 
     pub async fn restore(&mut self) -> crate::error::Result<()> {
         if let Some(ref backup) = self.backup {
-            #[cfg(target_os = "windows")]
-            windows::set_proxy(backup)?;
-            #[cfg(target_os = "linux")]
-            linux::set_proxy(backup)?;
-            #[cfg(target_os = "macos")]
-            macos::set_proxy(backup)?;
+            if backup.is_empty() {
+                self.clear().await?;
+            } else {
+                #[cfg(target_os = "windows")]
+                windows::set_proxy(backup)?;
+                #[cfg(target_os = "linux")]
+                linux::set_proxy(backup)?;
+                #[cfg(target_os = "macos")]
+                macos::set_proxy(backup)?;
+            }
         } else if self.applied {
             self.clear().await?;
         }

@@ -13,6 +13,7 @@ pub mod error;
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tauri::Manager;
 
 pub struct AppState {
     pub config: Arc<RwLock<config::Store>>,
@@ -76,6 +77,7 @@ pub fn run() {
     });
 
     let app_state = state.clone();
+    let window_state = state.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -107,16 +109,28 @@ pub fn run() {
                 tray::setup_tray(&tray_handle).await;
             });
 
-            let status_handle = app_handle.clone();
+            let enable_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 let config = state.config.read().await;
-                if config.get().enabled {
-                    drop(config);
-                    let _ = app::events::emit_status_update(&status_handle, &state).await;
+                let enabled = config.get().enabled;
+                drop(config);
+                if enabled {
+                    let _ = crate::app::commands::enable_proxy(enable_handle).await;
                 }
             });
 
             Ok(())
+        })
+        .on_window_event(move |window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let app_handle = window.app_handle().clone();
+                let state = window_state.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = crate::app::commands::quit_and_cleanup(state).await;
+                    app_handle.exit(0);
+                });
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
