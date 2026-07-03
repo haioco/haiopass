@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HaioBypass</title>
+  <link rel="stylesheet" href="styles/style.css" />
+</head>
+<body>
+  <div class="container">
+
+    <header class="light-header">
+      <div class="header-left">
+        <img src="assets/icons/logo.png" class="logo-img" alt="Haio" />
+        <span class="app-name" data-i18n="appName">HaioBypass</span>
+      </div>
+      <div class="header-right">
+        <button class="lang-toggle" id="langToggle">EN</button>
+        <span class="status-badge" id="statusBadge">OFF</span>
+      </div>
+    </header>
+
+    <!-- Initial config-only view -->
+    <div class="card config-only" id="configOnlyCard">
+      <div class="card-header">
+        <span class="card-label" data-i18n="configLabel">Your Trojan Config</span>
+      </div>
+      <textarea
+        id="configInput"
+        class="config-box config-input"
+        rows="3"
+        spellcheck="false"
+        placeholder="trojan://..." data-i18n-placeholder="configPlaceholder"></textarea>
+      <div class="config-actions">
+        <span class="config-status" id="configStatus"></span>
+        <button class="btn-save" id="saveConfigBtn" data-i18n="saveConfig">Save Config</button>
+      </div>
+    </div>
+
+    <!-- Main proxy controls -->
+    <div class="main-controls hidden" id="mainControls">
+      <div class="toggle-card">
+        <div class="toggle-info">
+          <span class="toggle-title" id="toggleTitle" data-i18n="proxyDisabled">Proxy Disabled</span>
+          <small class="toggle-sub" id="domainCount"></small>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="proxyToggle" />
+          <span class="track"></span>
+        </label>
+      </div>
+
+      <div class="conn-status" id="connStatus">
+        <span class="conn-dot" id="connDot"></span>
+        <span class="conn-text" id="connText" data-i18n="proxyOff">Proxy is off</span>
+      </div>
+
+      <div id="errorMsg" class="error-msg hidden"></div>
+
+      <!-- Trojan setup -->
+      <div class="card setup-card" id="setupCard">
+        <div class="card-header">
+          <span class="card-label" data-i18n="setupLabel">Trojan Client</span>
+        </div>
+        <div class="setup-body">
+          <p class="setup-desc" data-i18n="setupDesc">
+            The proxy needs the Trojan client running locally. Click to install and start it.
+          </p>
+          <button class="btn-dl" id="btnSetup" data-i18n="installStart">Install Trojan &amp; Start</button>
+          <div id="trojanStatus" class="setup-status hidden">
+            <span class="conn-dot connected"></span>
+            <span id="trojanStatusText">Running</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Port -->
+      <div class="card port-row">
+        <span class="card-label" data-i18n="portLabel">HTTP Proxy Port</span>
+        <input type="number" id="portInput" min="1024" max="65535" value="11032" />
+      </div>
+
+      <!-- Settings button -->
+      <button class="btn-settings" id="btnSettings" data-i18n="settings">Settings</button>
+    </div>
+
+    <!-- Settings panel -->
+    <div class="settings-panel hidden" id="settingsPanel">
+      <div class="settings-header">
+        <span class="card-label" data-i18n="devToolPresets">Dev Tool Proxy Presets</span>
+        <button class="btn-back" id="btnBack">← Back</button>
+      </div>
+      <div class="presets-list" id="presetsList"></div>
+      <div class="settings-footer">
+        <label class="preset-toggle">
+          <span data-i18n="autostart">Start with system</span>
+          <input type="checkbox" id="autostartToggle" />
+        </label>
+      </div>
+    </div>
+
+    <!-- Buy banner -->
+    <a class="buy-banner" href="https://console.haio.ir" target="_blank">
+      <span class="buy-icon">&#128722;</span>
+      <span class="buy-text">
+        <strong data-i18n="buyConfig">Buy Config</strong>
+        <small>console.haio.ir</small>
+      </span>
+      <span class="buy-arrow">&rarr;</span>
+    </a>
+
+    <div class="overlay" id="overlay">
+      <div class="spinner"></div>
+      <span id="overlayMsg">Applying...</span>
+    </div>
+
+  </div>
+  <script type="module" src="scripts/main.js"></script>
+</body>
+</html>
