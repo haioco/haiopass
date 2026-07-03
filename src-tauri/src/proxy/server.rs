@@ -269,23 +269,35 @@ async fn handle_connection(
 async fn read_request(
     stream: tokio::net::TcpStream,
 ) -> crate::error::Result<(String, tokio::net::TcpStream)> {
-    use tokio::io::BufReader;
-    use tokio::io::AsyncBufReadExt;
+    use tokio::io::AsyncReadExt;
 
-    let mut reader = BufReader::new(stream);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line).await
-        .map_err(|e| crate::error::HaioError::Proxy(format!("Failed to read request line: {}", e)))?;
+    let mut stream = stream;
+    let mut buf = Vec::with_capacity(512);
+    let mut tmp = [0u8; 1];
 
-    // Read headers until empty line
+    // Read byte-by-byte until we find \r\n\r\n (end of HTTP headers)
+    // This ensures we don't over-read into the SSL ClientHello
     loop {
-        let mut line = String::new();
-        reader.read_line(&mut line).await
-            .map_err(|e| crate::error::HaioError::Proxy(format!("Failed to read header: {}", e)))?;
-        if line.trim().is_empty() {
+        let n = stream.read(&mut tmp).await
+            .map_err(|e| crate::error::HaioError::Proxy(format!("Failed to read request: {}", e)))?;
+        if n == 0 {
+            return Err(crate::error::HaioError::Proxy("Connection closed before headers".into()));
+        }
+        buf.push(tmp[0]);
+
+        // Check for end-of-headers: \r\n\r\n
+        if buf.len() >= 4 && buf[buf.len()-4..] == *b"\r\n\r\n" {
             break;
+        }
+
+        // Safety limit
+        if buf.len() > 8192 {
+            return Err(crate::error::HaioError::Proxy("Headers too large".into()));
         }
     }
 
-    Ok((request_line.trim().to_string(), reader.into_inner()))
+    let raw = String::from_utf8_lossy(&buf).to_string();
+    let request_line = raw.lines().next().unwrap_or("").trim().to_string();
+
+    Ok((request_line, stream))
 }

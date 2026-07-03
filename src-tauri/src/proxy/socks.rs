@@ -107,7 +107,7 @@ async fn try_dial_socks5(
         // Skip variable-length bind address
         match resp[3] {
             0x01 => {
-                let mut buf = [0u8; 4];
+                let mut buf = [0u8; 6];
                 stream.read_exact(&mut buf).await?;
             }
             0x03 => {
