@@ -1,12 +1,14 @@
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::sync::{RwLock, Notify};
-use tokio::io::{BufReader, AsyncBufReadExt};
 
 use super::router::DomainRouter;
 use super::socks;
 use super::pac;
+
+const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub struct ProxyServer {
     handle: Option<tokio::task::JoinHandle<()>>,
@@ -91,28 +93,21 @@ async fn handle_connection(
     router: Arc<DomainRouter>,
     pac_port: u16,
 ) {
-    let mut reader = BufReader::new(stream);
-    let mut request_line = String::new();
-
-    if reader.read_line(&mut request_line).await.is_err() {
-        return;
-    }
-
-    // Read headers
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line).await.is_err() {
+    // Read the initial request line and headers using a timeout
+    let (request_line, stream) = match tokio::time::timeout(
+        Duration::from_secs(10),
+        read_request(stream),
+    ).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => {
+            tracing::debug!("Failed to read request: {}", e);
             return;
         }
-        if line.trim().is_empty() {
-            break;
+        Err(_) => {
+            tracing::debug!("Timed out reading request headers");
+            return;
         }
-    }
-
-    let request_line = request_line.trim().to_string();
-
-    // Reassemble the stream from BufReader
-    let stream = reader.into_inner();
+    };
 
     // Handle PAC request
     if request_line.starts_with("GET /pac.js") {
@@ -146,7 +141,21 @@ async fn handle_connection(
             match socks::dial_socks5(&router.socks_addr(), host, port).await {
                 Ok(mut remote) => {
                     let _ = stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await;
-                    let _ = tokio::io::copy_bidirectional(&mut stream, &mut remote).await;
+                    let result = tokio::time::timeout(
+                        IDLE_TIMEOUT,
+                        tokio::io::copy_bidirectional(&mut stream, &mut remote),
+                    ).await;
+                    match result {
+                        Ok(Ok((up, down))) => {
+                            tracing::debug!("CONNECT {}:{} done (up={} down={})", host, port, up, down);
+                        }
+                        Ok(Err(e)) => {
+                            tracing::warn!("CONNECT {}:{} stream error: {}", host, port, e);
+                        }
+                        Err(_) => {
+                            tracing::warn!("CONNECT {}:{} timed out after {:?}", host, port, IDLE_TIMEOUT);
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::error!("SOCKS5 connect to {}:{} failed: {}", host, port, e);
@@ -157,7 +166,21 @@ async fn handle_connection(
             match socks::dial_direct(host, port).await {
                 Ok(mut remote) => {
                     let _ = stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await;
-                    let _ = tokio::io::copy_bidirectional(&mut stream, &mut remote).await;
+                    let result = tokio::time::timeout(
+                        IDLE_TIMEOUT,
+                        tokio::io::copy_bidirectional(&mut stream, &mut remote),
+                    ).await;
+                    match result {
+                        Ok(Ok((up, down))) => {
+                            tracing::debug!("DIRECT {}:{} done (up={} down={})", host, port, up, down);
+                        }
+                        Ok(Err(e)) => {
+                            tracing::warn!("DIRECT {}:{} stream error: {}", host, port, e);
+                        }
+                        Err(_) => {
+                            tracing::warn!("DIRECT {}:{} timed out after {:?}", host, port, IDLE_TIMEOUT);
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::error!("Direct connect to {}:{} failed: {}", host, port, e);
@@ -169,61 +192,100 @@ async fn handle_connection(
     }
 
     // Handle plain HTTP proxy request (absolute-URI: GET http://host/path)
-    if request_line.to_uppercase().starts_with("GET http://")
-        || request_line.to_uppercase().starts_with("POST http://")
-        || request_line.to_uppercase().starts_with("PUT http://")
-        || request_line.to_uppercase().starts_with("DELETE http://")
-        || request_line.to_uppercase().starts_with("PATCH http://")
-        || request_line.to_uppercase().starts_with("HEAD http://")
-        || request_line.to_uppercase().starts_with("OPTIONS http://")
-    {
-        let parts: Vec<&str> = request_line.splitn(3, ' ').collect();
-        if parts.len() < 3 {
-            return;
-        }
-        let url_str = parts[1];
-        let rest = parts[2..].join(" ");
-
-        // Parse the absolute URL
-        let url = match url::Url::parse(url_str) {
-            Ok(u) => u,
-            Err(_) => return,
-        };
-        let host = match url.host_str() {
-            Some(h) => h,
-            None => return,
-        };
-        let port = url.port().unwrap_or(80);
-
-        // Build origin-form request line
-        let path = url.path();
-        let query = url.query().map(|q| format!("?{}", q)).unwrap_or_default();
-        let origin_line = format!("{} {}{} {}", parts[0], path, query, rest);
-
-        let mut stream = stream;
-
-        if router.should_proxy(host).await {
-            match socks::dial_socks5(&router.socks_addr(), host, port).await {
-                Ok(mut remote) => {
-                    let _ = remote.write_all(origin_line.as_bytes()).await;
-                    let _ = tokio::io::copy_bidirectional(&mut stream, &mut remote).await;
-                }
-                Err(e) => {
-                    tracing::error!("SOCKS5 connect to {}:{} failed: {}", host, port, e);
-                    let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
-                }
+    let method = request_line.split_whitespace().next().unwrap_or("");
+    if matches!(method, "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS") {
+        let upper = request_line.to_uppercase();
+        if let Some(_rest) = upper.split_once(" HTTP://") {
+            let parts: Vec<&str> = request_line.splitn(3, ' ').collect();
+            if parts.len() < 3 {
+                return;
             }
-        } else {
-            match socks::dial_direct(host, port).await {
-                Ok(mut remote) => {
-                    let _ = remote.write_all(origin_line.as_bytes()).await;
-                    let _ = tokio::io::copy_bidirectional(&mut stream, &mut remote).await;
+            let url_str = parts[1];
+            let suffix = parts[2..].join(" ");
+
+            let url = match url::Url::parse(url_str) {
+                Ok(u) => u,
+                Err(_) => return,
+            };
+            let host = match url.host_str() {
+                Some(h) => h,
+                None => return,
+            };
+            let port = url.port().unwrap_or(80);
+
+            let path = url.path();
+            let query = url.query().map(|q| format!("?{}", q)).unwrap_or_default();
+            let origin_line = format!("{} {}{} {}", parts[0], path, query, suffix);
+
+            let mut stream = stream;
+
+            if router.should_proxy(host).await {
+                match socks::dial_socks5(&router.socks_addr(), host, port).await {
+                    Ok(mut remote) => {
+                        let _ = remote.write_all(origin_line.as_bytes()).await;
+                        let result = tokio::time::timeout(
+                            IDLE_TIMEOUT,
+                            tokio::io::copy_bidirectional(&mut stream, &mut remote),
+                        ).await;
+                        if let Err(e) = match result {
+                            Ok(Ok(_)) => Ok(()),
+                            Ok(Err(e)) => Err(e.to_string()),
+                            Err(_) => Err("timeout".to_string()),
+                        } {
+                            tracing::warn!("HTTP proxy {}:{} error: {}", host, port, e);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("SOCKS5 connect to {}:{} failed: {}", host, port, e);
+                        let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("Direct connect to {}:{} failed: {}", host, port, e);
-                    let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
+            } else {
+                match socks::dial_direct(host, port).await {
+                    Ok(mut remote) => {
+                        let _ = remote.write_all(origin_line.as_bytes()).await;
+                        let result = tokio::time::timeout(
+                            IDLE_TIMEOUT,
+                            tokio::io::copy_bidirectional(&mut stream, &mut remote),
+                        ).await;
+                        if let Err(e) = match result {
+                            Ok(Ok(_)) => Ok(()),
+                            Ok(Err(e)) => Err(e.to_string()),
+                            Err(_) => Err("timeout".to_string()),
+                        } {
+                            tracing::warn!("HTTP direct {}:{} error: {}", host, port, e);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Direct connect to {}:{} failed: {}", host, port, e);
+                        let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
+                    }
                 }
             }
         }
     }
+}
+
+async fn read_request(
+    stream: tokio::net::TcpStream,
+) -> crate::error::Result<(String, tokio::net::TcpStream)> {
+    use tokio::io::BufReader;
+    use tokio::io::AsyncBufReadExt;
+
+    let mut reader = BufReader::new(stream);
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line).await
+        .map_err(|e| crate::error::HaioError::Proxy(format!("Failed to read request line: {}", e)))?;
+
+    // Read headers until empty line
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).await
+            .map_err(|e| crate::error::HaioError::Proxy(format!("Failed to read header: {}", e)))?;
+        if line.trim().is_empty() {
+            break;
+        }
+    }
+
+    Ok((request_line.trim().to_string(), reader.into_inner()))
 }

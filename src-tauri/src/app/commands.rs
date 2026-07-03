@@ -93,10 +93,16 @@ pub async fn enable_proxy(
     let arc_state: std::sync::Arc<AppState> = state.inner().clone();
     {
         let mut interval_handle = state.interval_handle.write().await;
-        *interval_handle = Some(start_refresh_interval(arc_state, app_handle.clone()));
+        *interval_handle = Some(start_refresh_interval(arc_state.clone(), app_handle.clone()));
     }
 
-    // 9. Do initial domain fetch
+    // 9. Start health monitor (every 30s)
+    {
+        let mut health_handle = state.health_handle.write().await;
+        *health_handle = Some(start_health_monitor(arc_state.clone(), app_handle.clone()));
+    }
+
+    // 10. Do initial domain fetch
     refresh_domains_inner(state.inner().clone(), app_handle.clone()).await;
 
     // 10. Emit status
@@ -114,6 +120,14 @@ pub async fn disable_proxy(
     {
         let mut interval_handle = state.interval_handle.write().await;
         if let Some(handle) = interval_handle.take() {
+            handle.abort();
+        }
+    }
+
+    // Stop the health monitor
+    {
+        let mut health_handle = state.health_handle.write().await;
+        if let Some(handle) = health_handle.take() {
             handle.abort();
         }
     }
@@ -423,6 +437,99 @@ fn start_refresh_interval(
         loop {
             interval.tick().await;
             let _ = refresh_domains_inner(state.clone(), app_handle.clone()).await;
+        }
+    })
+}
+
+fn start_health_monitor(
+    state: std::sync::Arc<AppState>,
+    app_handle: tauri::AppHandle,
+) -> tauri::async_runtime::JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        interval.tick().await; // consume immediate first tick
+
+        let mut consecutive_failures: u32 = 0;
+
+        loop {
+            interval.tick().await;
+
+            // Get port config
+            let (http_port, socks_port, enabled) = {
+                let config = state.config.read().await;
+                (
+                    config.get().http_proxy_port,
+                    config.get().proxy_port,
+                    config.get().enabled,
+                )
+            };
+
+            if !enabled {
+                break;
+            }
+
+            let health = crate::health::check_trojan_health(http_port, socks_port).await;
+
+            if health.all_healthy {
+                if consecutive_failures > 0 {
+                    tracing::info!("Health check recovered after {} failures", consecutive_failures);
+                }
+                consecutive_failures = 0;
+                let _ = app_handle.emit("health:check", serde_json::json!({
+                    "ok": true,
+                    "httpPort": http_port,
+                    "socksPort": socks_port,
+                }));
+            } else {
+                consecutive_failures += 1;
+                tracing::warn!(
+                    "Health check failed (http={}, socks={}, failures={})",
+                    health.http_proxy_ok,
+                    health.socks5_ok,
+                    consecutive_failures
+                );
+
+                let _ = app_handle.emit("health:check", serde_json::json!({
+                    "ok": false,
+                    "httpPort": http_port,
+                    "socksPort": socks_port,
+                    "consecutiveFailures": consecutive_failures,
+                }));
+
+                // If SOCKS5 is down but trojan manager says it should be running,
+                // try to signal the watchdog to restart
+                if !health.socks5_ok && consecutive_failures >= 2 {
+                    let mut trojan = state.trojan.write().await;
+                    let (running, _) = trojan.status();
+                    if running {
+                        // Process says it's running but port is down — it's probably hung
+                        tracing::warn!("Trojan-go process alive but SOCKS5 port unresponsive, stopping to trigger restart");
+                        let _ = trojan.stop().await;
+                    }
+
+                    // If HTTP proxy is also down, restart the whole proxy stack
+                    if !health.http_proxy_ok && consecutive_failures >= 3 {
+                        tracing::warn!("Full proxy stack down, attempting restart");
+                        drop(trojan);
+                        // The enable_proxy command would need to be called from frontend,
+                        // but we can try to restart just the trojan part
+                        let tc = {
+                            let config = state.config.read().await;
+                            config.get().trojan_config.clone()
+                        };
+                        let port = {
+                            let config = state.config.read().await;
+                            config.get().proxy_port
+                        };
+                        if let Some(tc) = tc {
+                            let mut trojan = state.trojan.write().await;
+                            if let Err(e) = trojan.start(tc, port).await {
+                                tracing::error!("Auto-restart trojan failed: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
         }
     })
 }

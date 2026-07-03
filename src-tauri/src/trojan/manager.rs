@@ -1,16 +1,24 @@
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::{Child, Command};
+use tokio::sync::Notify;
 use crate::config::TrojanConfig;
 use crate::trojan::config_writer;
 
 const TROJAN_BINARY: &str = "trojan-go";
+const MAX_RESTART_ATTEMPTS: u8 = 3;
+const RESTART_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+const WATCHDOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub struct TrojanManager {
     child: Option<Child>,
     binary_path: PathBuf,
     config_path: PathBuf,
     log_path: PathBuf,
+    saved_config: Option<TrojanConfig>,
+    saved_port: Option<u16>,
+    watchdog_handle: Option<tokio::task::JoinHandle<()>>,
+    restart_notify: Arc<Notify>,
 }
 
 impl Default for TrojanManager {
@@ -18,6 +26,8 @@ impl Default for TrojanManager {
         Self::new()
     }
 }
+
+use std::sync::Arc;
 
 impl TrojanManager {
     pub fn new() -> Self {
@@ -28,6 +38,10 @@ impl TrojanManager {
             binary_path: config_dir.join(format!("{}{}", TROJAN_BINARY, ext)),
             config_path: config_dir.join("config.json"),
             log_path: config_dir.join("trojan.log"),
+            saved_config: None,
+            saved_port: None,
+            watchdog_handle: None,
+            restart_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -73,10 +87,25 @@ impl TrojanManager {
         let child = cmd.spawn().map_err(|e| crate::error::HaioError::Trojan(format!("Failed to start: {}", e)))?;
         tracing::info!("Started trojan-go pid {:?}", child.id());
         self.child = Some(child);
+
+        // Save config for restarts
+        self.saved_config = Some(config);
+        self.saved_port = Some(local_port);
+
+        // Start watchdog
+        self.start_watchdog();
+
         Ok(())
     }
 
     pub async fn stop(&mut self) -> crate::error::Result<()> {
+        // Cancel watchdog first
+        self.stop_watchdog();
+
+        // Clear saved config to prevent watchdog from restarting
+        self.saved_config = None;
+        self.saved_port = None;
+
         if let Some(mut child) = self.child.take() {
             let _ = child.kill().await;
             let _ = child.wait().await;
@@ -95,6 +124,141 @@ impl TrojanManager {
                 }
             }
             None => (false, None),
+        }
+    }
+
+    fn start_watchdog(&mut self) {
+        self.stop_watchdog();
+
+        let binary_path = self.binary_path.clone();
+        let config_path = self.config_path.clone();
+        let log_path = self.log_path.clone();
+        let saved_config = self.saved_config.clone();
+        let saved_port = self.saved_port;
+        let notify = self.restart_notify.clone();
+
+        if saved_config.is_none() || saved_port.is_none() {
+            return;
+        }
+
+        let handle = tokio::spawn(async move {
+            let mut restart_count: u8 = 0;
+
+            loop {
+                tokio::time::sleep(WATCHDOG_INTERVAL).await;
+
+                // Check if restart was requested (after a crash)
+                tokio::select! {
+                    _ = notify.notified() => {
+                        // Reset restart count on explicit notification
+                        restart_count = 0;
+                    }
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(0)) => {}
+                }
+
+                // Check if process is alive
+                // We can't check directly from outside, so we check the port
+                let config = match &saved_config {
+                    Some(c) => c,
+                    None => break,
+                };
+                let port = match saved_port {
+                    Some(p) => p,
+                    None => break,
+                };
+
+                // Quick port check
+                let addr = format!("127.0.0.1:{}", port);
+                let alive = tokio::time::timeout(
+                    std::time::Duration::from_secs(3),
+                    tokio::net::TcpStream::connect(&addr),
+                )
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .is_some();
+
+                if alive {
+                    restart_count = 0;
+                    continue;
+                }
+
+                // Process is dead, attempt restart
+                if restart_count >= MAX_RESTART_ATTEMPTS {
+                    tracing::error!(
+                        "Trojan-go crashed and failed to restart after {} attempts",
+                        MAX_RESTART_ATTEMPTS
+                    );
+                    break;
+                }
+
+                restart_count += 1;
+                tracing::warn!(
+                    "Trojan-go appears down, restarting (attempt {}/{})",
+                    restart_count,
+                    MAX_RESTART_ATTEMPTS
+                );
+
+                tokio::time::sleep(RESTART_INTERVAL).await;
+
+                // Re-extract binary if missing
+                if !binary_path.exists() {
+                    if let Err(e) = super::bundled::extract_bundled(&binary_path) {
+                        tracing::error!("Failed to re-extract trojan-go binary: {}", e);
+                        continue;
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = tokio::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o755)).await;
+                    }
+                }
+
+                // Rewrite config (in case it was deleted)
+                if let Err(e) = config_writer::write_config(&config_path, config, port) {
+                    tracing::error!("Failed to rewrite trojan config: {}", e);
+                    continue;
+                }
+
+                // Spawn new process
+                let log_file = match std::fs::File::create(&log_path) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        tracing::error!("Failed to create log file: {}", e);
+                        continue;
+                    }
+                };
+
+                let mut cmd = Command::new(&binary_path);
+                cmd.arg("--config").arg(&config_path);
+                if let Ok(f) = log_file.try_clone() {
+                    cmd.stdout(Stdio::from(f));
+                }
+                cmd.stderr(Stdio::from(log_file));
+
+                #[cfg(windows)]
+                {
+                    cmd.creation_flags(0x08000000);
+                }
+
+                match cmd.spawn() {
+                    Ok(_child) => {
+                        tracing::info!("Watchdog restarted trojan-go (pid {:?})", _child.id());
+                        // We can't store the child in this task, but the port check will verify it
+                    }
+                    Err(e) => {
+                        tracing::error!("Watchdog failed to restart trojan-go: {}", e);
+                    }
+                }
+            }
+        });
+
+        self.watchdog_handle = Some(handle);
+    }
+
+    fn stop_watchdog(&mut self) {
+        if let Some(handle) = self.watchdog_handle.take() {
+            handle.abort();
         }
     }
 }

@@ -22,6 +22,7 @@ pub struct AppState {
     pub os_proxy: Arc<RwLock<osproxy::OsProxy>>,
     pub app_proxy: Arc<RwLock<appproxy::AppProxyRegistry>>,
     pub interval_handle: Arc<RwLock<Option<tauri::async_runtime::JoinHandle<()>>>>,
+    pub health_handle: Arc<RwLock<Option<tauri::async_runtime::JoinHandle<()>>>>,
 }
 
 pub fn run() {
@@ -71,6 +72,7 @@ pub fn run() {
         os_proxy: Arc::new(RwLock::new(osproxy::OsProxy::new())),
         app_proxy: Arc::new(RwLock::new(appproxy::AppProxyRegistry::new())),
         interval_handle: Arc::new(RwLock::new(None)),
+        health_handle: Arc::new(RwLock::new(None)),
     });
 
     let app_state = state.clone();

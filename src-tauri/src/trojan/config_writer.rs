@@ -6,6 +6,8 @@ pub fn write_config(
     config: &TrojanConfig,
     local_port: u16,
 ) -> crate::error::Result<()> {
+    let fallback_port = local_port + 1;
+
     let cfg = serde_json::json!({
         "run_type": "client",
         "local_addr": "127.0.0.1",
@@ -20,8 +22,9 @@ pub fn write_config(
             "sni": config.sni,
             "alpn": ["h2", "http/1.1"],
             "reuse_session": true,
-            "session_ticket": false,
-            "curves": ""
+            "session_ticket": true,
+            "curves": "",
+            "buffer_size": 32768
         },
         "tcp": {
             "prefer_ipv4": false,
@@ -30,6 +33,10 @@ pub fn write_config(
             "reuse_port": false,
             "fast_open": false,
             "fast_open_qlen": 20
+        },
+        "fallback": {
+            "addr": "127.0.0.1",
+            "port": fallback_port
         }
     });
 
