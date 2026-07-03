@@ -19,8 +19,8 @@ pub fn set_proxy(addr: &str) -> crate::error::Result<()> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let key = hkcu.open_subkey_with_flags(INTERNET_SETTINGS, KEY_WRITE)?;
     key.set_value("ProxyEnable", &1u32)?;
-    key.set_value("ProxyServer", addr)?;
-    key.set_value("ProxyOverride", &"localhost;127.*;10.*;192.168.*;<local>")?;
+    key.set_value("ProxyServer", &addr.to_string())?;
+    key.set_value("ProxyOverride", &"localhost;127.*;10.*;192.168.*;<local>".to_string())?;
     broadcast_settings_change();
     Ok(())
 }

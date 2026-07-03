@@ -69,7 +69,6 @@ impl TrojanManager {
 
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
 
