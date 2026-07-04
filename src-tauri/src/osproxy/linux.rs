@@ -29,16 +29,33 @@ fn get_gsettings(schema: &str, key: &str) -> crate::error::Result<String> {
 
 pub fn set_proxy(addr: &str) -> crate::error::Result<()> {
     let parts: Vec<&str> = addr.split(':').collect();
+    let host = parts.first().copied().unwrap_or("127.0.0.1");
     let port: u16 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(11032);
 
     let pac_url = format!("http://127.0.0.1:{}/pac.js", port);
 
+    // PAC auto-config for browsers (fixes WebSocket wss:// proxying)
     Command::new("gsettings").args([
         "set", "org.gnome.system.proxy", "mode", "'auto'"
     ]).output()?;
     Command::new("gsettings").args([
         "set", "org.gnome.system.proxy", "autoconfig-url", &format!("'{}'", pac_url)
     ]).output()?;
+
+    // Manual HTTP/HTTPS proxy for Android Studio / Gradle / JVM tools
+    Command::new("gsettings").args([
+        "set", "org.gnome.system.proxy.http", "host", &format!("'{}'", host)
+    ]).output()?;
+    Command::new("gsettings").args([
+        "set", "org.gnome.system.proxy.http", "port", &port.to_string()
+    ]).output()?;
+    Command::new("gsettings").args([
+        "set", "org.gnome.system.proxy.https", "host", &format!("'{}'", host)
+    ]).output()?;
+    Command::new("gsettings").args([
+        "set", "org.gnome.system.proxy.https", "port", &port.to_string()
+    ]).output()?;
+
     Command::new("gsettings").args([
         "set", "org.gnome.system.proxy", "ignore-hosts",
         "['localhost', '127.0.0.0/8', '::1']"

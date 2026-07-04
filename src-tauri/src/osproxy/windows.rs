@@ -27,7 +27,11 @@ pub fn set_proxy(addr: &str) -> crate::error::Result<()> {
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let key = hkcu.open_subkey_with_flags(INTERNET_SETTINGS, KEY_WRITE)?;
-    key.set_value("ProxyEnable", &0u32)?;
+    // Manual proxy for Android Studio / Gradle / JVM tools
+    key.set_value("ProxyEnable", &1u32)?;
+    key.set_value("ProxyServer", &addr.to_string())?;
+    key.set_value("ProxyOverride", &"localhost;127.*;10.*;192.168.*;<local>".to_string())?;
+    // PAC auto-config for browsers (fixes WebSocket wss:// proxying)
     key.set_value("AutoConfigURL", &pac_url)?;
     broadcast_settings_change();
     Ok(())

@@ -38,12 +38,22 @@ pub fn get_current_proxy() -> crate::error::Result<String> {
 
 pub fn set_proxy(addr: &str) -> crate::error::Result<()> {
     let parts: Vec<&str> = addr.split(':').collect();
+    let host = parts.first().copied().unwrap_or("127.0.0.1");
+    let port_str = parts.get(1).copied().unwrap_or("11032");
     let port: u16 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(11032);
     let pac_url = format!("http://127.0.0.1:{}/pac.js", port);
     let services = get_active_services();
     for service in &services {
+        // PAC auto-config for browsers (fixes WebSocket wss:// proxying)
         Command::new("networksetup")
             .args(["-setautoproxyurl", service, &pac_url])
+            .output()?;
+        // Manual HTTP/HTTPS proxy for Android Studio / Gradle / JVM tools
+        Command::new("networksetup")
+            .args(["-setwebproxy", service, host, port_str, "off"])
+            .output()?;
+        Command::new("networksetup")
+            .args(["-setsecurewebproxy", service, host, port_str, "off"])
             .output()?;
     }
     Ok(())
@@ -54,6 +64,12 @@ pub fn clear_proxy() -> crate::error::Result<()> {
     for service in &services {
         Command::new("networksetup")
             .args(["-setautoproxystate", service, "off"])
+            .output()?;
+        Command::new("networksetup")
+            .args(["-setwebproxystate", service, "off"])
+            .output()?;
+        Command::new("networksetup")
+            .args(["-setsecurewebproxystate", service, "off"])
             .output()?;
     }
     Ok(())
