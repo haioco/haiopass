@@ -11,16 +11,24 @@ pub fn get_current_proxy() -> crate::error::Result<String> {
         let server: String = key.get_value("ProxyServer").unwrap_or_default();
         Ok(server)
     } else {
-        Ok(String::new())
+        let auto_url: String = key.get_value("AutoConfigURL").unwrap_or_default();
+        if !auto_url.is_empty() {
+            Ok(auto_url)
+        } else {
+            Ok(String::new())
+        }
     }
 }
 
 pub fn set_proxy(addr: &str) -> crate::error::Result<()> {
+    let parts: Vec<&str> = addr.split(':').collect();
+    let port: u16 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(11032);
+    let pac_url = format!("http://127.0.0.1:{}/pac.js", port);
+
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let key = hkcu.open_subkey_with_flags(INTERNET_SETTINGS, KEY_WRITE)?;
-    key.set_value("ProxyEnable", &1u32)?;
-    key.set_value("ProxyServer", &addr.to_string())?;
-    key.set_value("ProxyOverride", &"localhost;127.*;10.*;192.168.*;<local>".to_string())?;
+    key.set_value("ProxyEnable", &0u32)?;
+    key.set_value("AutoConfigURL", &pac_url)?;
     broadcast_settings_change();
     Ok(())
 }

@@ -20,15 +20,15 @@ pub fn get_current_proxy() -> crate::error::Result<String> {
     let services = get_active_services();
     for service in &services {
         let output = Command::new("networksetup")
-            .args(["-getwebproxy", service])
+            .args(["-getautoproxyurl", service])
             .output()?;
         let out = String::from_utf8_lossy(&output.stdout);
         if out.contains("Enabled: Yes") {
             let lines: Vec<&str> = out.lines().collect();
-            if let Some(server_line) = lines.iter().find(|l| l.starts_with("Server:")) {
-                let server = server_line.trim_start_matches("Server:").trim();
-                if !server.is_empty() {
-                    return Ok(server.to_string());
+            if let Some(url_line) = lines.iter().find(|l| l.starts_with("URL:")) {
+                let url = url_line.trim_start_matches("URL:").trim();
+                if !url.is_empty() {
+                    return Ok(url.to_string());
                 }
             }
         }
@@ -38,15 +38,12 @@ pub fn get_current_proxy() -> crate::error::Result<String> {
 
 pub fn set_proxy(addr: &str) -> crate::error::Result<()> {
     let parts: Vec<&str> = addr.split(':').collect();
-    let host = parts.first().copied().unwrap_or("127.0.0.1");
-    let port = parts.get(1).copied().unwrap_or("11032");
+    let port: u16 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(11032);
+    let pac_url = format!("http://127.0.0.1:{}/pac.js", port);
     let services = get_active_services();
     for service in &services {
         Command::new("networksetup")
-            .args(["-setwebproxy", service, host, port, "off"])
-            .output()?;
-        Command::new("networksetup")
-            .args(["-setsecurewebproxy", service, host, port, "off"])
+            .args(["-setautoproxyurl", service, &pac_url])
             .output()?;
     }
     Ok(())
@@ -56,10 +53,7 @@ pub fn clear_proxy() -> crate::error::Result<()> {
     let services = get_active_services();
     for service in &services {
         Command::new("networksetup")
-            .args(["-setwebproxystate", service, "off"])
-            .output()?;
-        Command::new("networksetup")
-            .args(["-setsecurewebproxystate", service, "off"])
+            .args(["-setautoproxystate", service, "off"])
             .output()?;
     }
     Ok(())
