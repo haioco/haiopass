@@ -52,11 +52,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Build with Tauri (unsigned — Windows gets signed by SignPath after this step)
+      - name: Build with Tauri (uploads all artifacts to a draft release)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Updater signing key (for signed update manifests; separate from Windows cert)
+          # Updater signing key (for signed update manifests)
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
@@ -69,42 +69,28 @@ jobs:
           prerelease: false
           updaterJsonPreferNsis: true
 
-      - name: Collect build artifacts
-        id: collect
-        shell: bash
-        run: |
-          set -euo pipefail
-          bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle"
-          mkdir -p artifacts
-          found=0
-          for ext in nsis msi exe deb appimage rpm dmg; do
-            while IFS= read -r -d '' f; do
-              cp "$f" artifacts/
-              found=1
-              echo "Found: $f"
-            done < <(find "$bundle_dir" -type f -name "*.${ext}" -print0 2>/dev/null || true)
-          done
-          if [ "$found" -eq 0 ]; then
-            echo "No build artifacts found in $bundle_dir"
-            ls -laR "$bundle_dir" 2>/dev/null || true
-            exit 1
-          fi
-          ls -la artifacts/
+  sign-windows:
+    # Replaces the unsigned Windows assets on the draft release with
+    # Authenticode-signed versions from SignPath Foundation (free for OSS).
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      # ── Non-Windows: upload directly to the draft release ─────────────────────
-      - name: Upload non-Windows artifacts to release
-        if: runner.os != 'Windows'
+      - name: Download the draft release's Windows assets
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          for f in artifacts/*; do
-            gh release upload "${{ github.ref_name }}" "$f" --clobber
-          done
+          set -euo pipefail
+          mkdir -p artifacts
+          gh release download "${{ github.ref_name }}" \
+            --repo haioco/haiopass \
+            --dir artifacts \
+            --pattern '*.exe' --pattern '*.msi' --clobber
+          ls -la artifacts/
 
-      # ── Windows: submit to SignPath for Authenticode signing ──────────────────
-      - name: Upload unsigned Windows artifact (for SignPath)
-        if: runner.os == 'Windows'
+      - name: Upload unsigned Windows artifacts (for SignPath)
         id: upload-unsigned
         uses: actions/upload-artifact@v4
         with:
@@ -112,8 +98,8 @@ jobs:
           path: artifacts/*
           if-no-files-found: error
 
-      - name: Submit Windows artifact to SignPath for code signing
-        if: runner.os == 'Windows' && ${{ vars.SIGNPATH_ENABLED == 'true' }}
+      - name: Submit Windows artifacts to SignPath for code signing
+        if: ${{ vars.SIGNPATH_ENABLED == 'true' }}
         id: signpath
         uses: signpath/github-action-submit-signing-request@v2
         with:
@@ -125,34 +111,30 @@ jobs:
           wait-for-completion: true
           output-artifact-directory: signed
 
-      - name: Upload signed Windows artifacts to the release
-        if: runner.os == 'Windows' && ${{ vars.SIGNPATH_ENABLED == 'true' }}
+      - name: Replace draft-release Windows assets with signed versions
+        if: ${{ vars.SIGNPATH_ENABLED == 'true' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          Get-ChildItem -Path signed -Recurse -File | ForEach-Object {
-            gh release upload $env:GITHUB_REF_NAME $_.FullName --clobber
+          # Delete the unsigned assets from the draft release, then upload the signed ones.
+          $assets = gh release view $env:GITHUB_REF_NAME --repo haioco/haiopass --json assets --jq '.assets[].name'
+          foreach ($name in $assets) {
+            if ($name -match '\.(exe|msi)$') {
+              gh release delete-asset $env:GITHUB_REF_NAME $name --repo haioco/haiopass --yes
+            }
           }
-
-      - name: Fallback — upload unsigned Windows artifacts (no SignPath configured)
-        if: runner.os == 'Windows' && ${{ vars.SIGNPATH_ENABLED != 'true' }}
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          Write-Host "::warning::SIGNPATH_ENABLED var not set 'true'. Uploading UNSIGNED Windows build. Defender will flag this build."
-          Get-ChildItem -Path artifacts -Recurse -File | ForEach-Object {
-            gh release upload $env:GITHUB_REF_NAME $_.FullName --clobber
+          Get-ChildItem -Path signed -Recurse -File | ForEach-Object {
+            gh release upload $env:GITHUB_REF_NAME $_.FullName --repo haioco/haiopass --clobber
           }
 
   publish:
-    needs: build
+    needs: [build, sign-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Update release to published
         run: |
-          gh release edit ${{ github.ref_name }} --draft=false
+          gh release edit ${{ github.ref_name }} --repo haioco/haiopass --draft=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
