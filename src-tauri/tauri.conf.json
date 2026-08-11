@@ -60,7 +60,7 @@
     "updater": {
       "active": true,
       "endpoints": ["https://github.com/Haio-Cloud/HaioBypass-app/releases/latest/download/latest.json"],
-      "pubkey": "${TAURI_UPDATER_PUBKEY}",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEwMEQ0OUQ1M0E1Q0VEN0QKUldSOTdWdzYxVWtORUczNVVjMFRQSlpocmR2M2FrUUZoSHlqQldGWVlJSEEzTURnd1VUdUw2VnYK",
       "dialog": false,
       "windows": {
         "installMode": "passive"
