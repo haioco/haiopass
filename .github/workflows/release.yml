@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   build:
@@ -28,6 +29,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Download bundled haio-proxy binaries
+        shell: bash
+        run: bash scripts/fetch-trojan.sh
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -47,10 +52,13 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Build with Tauri action
+      - name: Build with Tauri (unsigned — Windows gets signed by SignPath after this step)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signing key (for signed update manifests; separate from Windows cert)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: .
           args: --target ${{ matrix.target }}
@@ -59,6 +67,84 @@ jobs:
           releaseBody: 'See the assets to download this version.'
           releaseDraft: true
           prerelease: false
+          updaterJsonPreferNsis: true
+
+      - name: Collect build artifacts
+        id: collect
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle"
+          mkdir -p artifacts
+          found=0
+          for ext in nsis msi exe deb appimage rpm dmg; do
+            while IFS= read -r -d '' f; do
+              cp "$f" artifacts/
+              found=1
+              echo "Found: $f"
+            done < <(find "$bundle_dir" -type f -name "*.${ext}" -print0 2>/dev/null || true)
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "No build artifacts found in $bundle_dir"
+            ls -laR "$bundle_dir" 2>/dev/null || true
+            exit 1
+          fi
+          ls -la artifacts/
+
+      # ── Non-Windows: upload directly to the draft release ─────────────────────
+      - name: Upload non-Windows artifacts to release
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for f in artifacts/*; do
+            gh release upload "${{ github.ref_name }}" "$f" --clobber
+          done
+
+      # ── Windows: submit to SignPath for Authenticode signing ──────────────────
+      - name: Upload unsigned Windows artifact (for SignPath)
+        if: runner.os == 'Windows'
+        id: upload-unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-unsigned
+          path: artifacts/*
+          if-no-files-found: error
+
+      - name: Submit Windows artifact to SignPath for code signing
+        if: runner.os == 'Windows' && ${{ vars.SIGNPATH_ENABLED == 'true' }}
+        id: signpath
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+          organization-id: '${{ secrets.SIGNPATH_ORGANIZATION_ID }}'
+          project-slug: 'haiobypass'
+          signing-policy-slug: 'release-signing'
+          github-artifact-id: '${{ steps.upload-unsigned.outputs.artifact-id }}'
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Upload signed Windows artifacts to the release
+        if: runner.os == 'Windows' && ${{ vars.SIGNPATH_ENABLED == 'true' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          Get-ChildItem -Path signed -Recurse -File | ForEach-Object {
+            gh release upload $env:GITHUB_REF_NAME $_.FullName --clobber
+          }
+
+      - name: Fallback — upload unsigned Windows artifacts (no SignPath configured)
+        if: runner.os == 'Windows' && ${{ vars.SIGNPATH_ENABLED != 'true' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          Write-Host "::warning::SIGNPATH_ENABLED var not set 'true'. Uploading UNSIGNED Windows build. Defender will flag this build."
+          Get-ChildItem -Path artifacts -Recurse -File | ForEach-Object {
+            gh release upload $env:GITHUB_REF_NAME $_.FullName --clobber
+          }
 
   publish:
     needs: build

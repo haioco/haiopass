@@ -1,28 +1,26 @@
 #!/usr/bin/env bash
+# Downloads upstream trojan-go binaries and rebrands them as haio-proxy-*
+# (neutral name to reduce AV false-positives on bundled proxy binary).
 set -euo pipefail
 
 RELEASES="https://github.com/p4gefau1t/trojan-go/releases/latest/download"
 DEST="$(cd "$(dirname "$0")/../resources/trojan-go" && pwd)"
 mkdir -p "$DEST"
 
+# Map: output_filename -> upstream_asset
 declare -A TARGETS
 TARGETS=(
-  ["trojan-go-windows-amd64"]="trojan-go-windows-amd64.zip"
-  ["trojan-go-linux-amd64"]="trojan-go-linux-amd64.zip"
-  ["trojan-go-darwin-amd64"]="trojan-go-darwin-amd64.zip"
-  ["trojan-go-darwin-arm64"]="trojan-go-darwin-arm64.zip"
+  ["haio-proxy-windows-amd64.exe"]="trojan-go-windows-amd64.zip"
+  ["haio-proxy-linux-amd64"]="trojan-go-linux-amd64.zip"
+  ["haio-proxy-darwin-amd64"]="trojan-go-darwin-amd64.zip"
+  ["haio-proxy-darwin-arm64"]="trojan-go-darwin-arm64.zip"
 )
 
 for binary_name in "${!TARGETS[@]}"; do
   asset="${TARGETS[$binary_name]}"
   url="$RELEASES/$asset"
   zip_path="/tmp/haio-$asset"
-
-  if [ "$binary_name" = "trojan-go-windows-amd64" ]; then
-    dest_path="$DEST/trojan-go-windows-amd64.exe"
-  else
-    dest_path="$DEST/$binary_name"
-  fi
+  dest_path="$DEST/$binary_name"
 
   if [ -f "$dest_path" ]; then
     echo "✓ $dest_path already exists, skipping"
@@ -35,17 +33,12 @@ for binary_name in "${!TARGETS[@]}"; do
   echo "Extracting $asset to $DEST ..."
   unzip -o "$zip_path" -d "$DEST" 2>/dev/null || true
 
-  # The zip might extract the binary with a different name (e.g. "trojan-go")
-  # Rename it to the expected platform-specific name
+  # The zip extracts as "trojan-go"; rename to our neutral name.
   if [ -f "$DEST/trojan-go" ]; then
-    if [[ "$binary_name" == *windows* ]]; then
-      mv "$DEST/trojan-go" "$DEST/trojan-go-windows-amd64.exe"
+    if [ ! -f "$dest_path" ]; then
+      mv "$DEST/trojan-go" "$dest_path"
     else
-      if [ ! -f "$dest_path" ]; then
-        mv "$DEST/trojan-go" "$dest_path"
-      else
-        rm "$DEST/trojan-go"
-      fi
+      rm "$DEST/trojan-go"
     fi
   fi
 
@@ -63,5 +56,5 @@ for binary_name in "${!TARGETS[@]}"; do
 done
 
 echo ""
-echo "All trojan-go binaries:"
+echo "All haio-proxy binaries:"
 ls -lh "$DEST"

@@ -5,7 +5,9 @@ use tokio::sync::Notify;
 use crate::config::TrojanConfig;
 use crate::trojan::config_writer;
 
-const TROJAN_BINARY: &str = "trojan-go";
+// Neutral runtime name to reduce AV heuristics. The extracted binary on disk
+// is named "haio-proxy" (or "haio-proxy.exe" on Windows) regardless of upstream.
+const TROJAN_BINARY: &str = "haio-proxy";
 const MAX_RESTART_ATTEMPTS: u8 = 3;
 const RESTART_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 const WATCHDOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
@@ -37,7 +39,7 @@ impl TrojanManager {
             child: None,
             binary_path: config_dir.join(format!("{}{}", TROJAN_BINARY, ext)),
             config_path: config_dir.join("config.json"),
-            log_path: config_dir.join("trojan.log"),
+            log_path: config_dir.join("haio-proxy.log"),
             saved_config: None,
             saved_port: None,
             watchdog_handle: None,

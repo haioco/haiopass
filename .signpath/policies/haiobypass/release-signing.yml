@@ -1,0 +1,31 @@
+# SignPath source/build policy for the haiobypass project, release-signing policy.
+# Docs: https://docs.signpath.io/trusted-build-systems/github#define-policies-for-source-code-and-builds
+#
+# This file is enforced by SignPath before any signing request is approved.
+# It guarantees the build originated from this branch on GitHub-hosted runners
+# and that the protected branches meet minimum integrity requirements.
+#
+# Adjust `min_required_approvals` and `enforced_from` to match your team's
+# actual branch ruleset, then enable the corresponding branch ruleset in GitHub.
+
+github-policies:
+  runners:
+    # OSS free tier requires all jobs on GitHub-hosted runners.
+    require_github_hosted: true
+
+  build:
+    # Prevent signing of re-runs of old builds (forces fresh build per release).
+    disallow_reruns: true
+
+  branch_rulesets:
+    - condition:
+        rules:
+          - restrict_deletions: true        # tag/release branches can't be deleted
+          - block_force_pushes: true        # history can't be rewritten
+          - require_pull_request:           # changes via PR only
+              min_required_approvals: 1
+              require_code_owner_review: true
+              dismiss_stale_reviews_on_push: true
+              require_review_thread_resolution: true
+      allow_bypass_actors: false
+      enforced_from: EARLIEST

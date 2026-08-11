@@ -4,3 +4,10 @@ frontend/dist/
 *.log
 .DS_Store
 Thumbs.db
+
+# Local artifacts not for the repo
+perf.data
+*.jpg
+__pycache__/
+# Tauri auto-generated schema snapshot (regenerated on build)
+src-tauri/gen/schemas/

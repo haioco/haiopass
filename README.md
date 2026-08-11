@@ -93,4 +93,8 @@ src/
 
 ## License
 
-Proprietary — Haio Cloud
+MIT — see [LICENSE](./LICENSE). The bundled `haio-proxy` binaries in
+`resources/trojan-go/` are upstream [trojan-go](https://github.com/p4gefau1t/trojan-go)
+releases, licensed under their own terms (AGPL-3.0). User-facing releases are
+Authenticode-signed for free via the [SignPath Foundation](https://signpath.org)
+open-source program — see [SIGNPATH.md](./SIGNPATH.md).
