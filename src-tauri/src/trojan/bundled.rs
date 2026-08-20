@@ -15,6 +15,13 @@ pub fn extract_bundled(dest: &Path) -> crate::error::Result<()> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(dest, EMBEDDED_BYTES)?;
+    // Write to a temp file and rename so overwriting an existing (possibly
+    // locked) binary is atomic on all platforms.
+    let tmp = dest.with_file_name(format!("{}.tmp", dest.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()));
+    std::fs::write(&tmp, EMBEDDED_BYTES)?;
+    if dest.exists() {
+        let _ = std::fs::remove_file(dest);
+    }
+    std::fs::rename(&tmp, dest)?;
     Ok(())
 }

@@ -48,16 +48,17 @@ impl TrojanManager {
     }
 
     pub async fn ensure_binary(&mut self) -> crate::error::Result<()> {
-        if self.binary_path.exists() {
-            return Ok(());
-        }
+        // Always re-extract the bundled binary and overwrite any cached copy.
+        // This guarantees upgrades replace stale/corrupt binaries (e.g. a wrong-arch
+        // binary left behind by an earlier broken release) instead of silently
+        // keeping the broken file and failing with ERROR_EXE_MACHINE_TYPE_MISMATCH.
         super::bundled::extract_bundled(&self.binary_path)?;
         #[cfg(not(windows))]
         {
             use std::os::unix::fs::PermissionsExt;
             tokio::fs::set_permissions(&self.binary_path, std::fs::Permissions::from_mode(0o755)).await?;
         }
-        tracing::info!("Extracted trojan-go to {}", self.binary_path.display());
+        tracing::info!("Ensured trojan-go binary at {}", self.binary_path.display());
         Ok(())
     }
 
@@ -203,17 +204,15 @@ impl TrojanManager {
 
                 tokio::time::sleep(RESTART_INTERVAL).await;
 
-                // Re-extract binary if missing
-                if !binary_path.exists() {
-                    if let Err(e) = super::bundled::extract_bundled(&binary_path) {
-                        tracing::error!("Failed to re-extract trojan-go binary: {}", e);
-                        continue;
-                    }
-                    #[cfg(not(windows))]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        let _ = tokio::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o755)).await;
-                    }
+                // Re-extract binary, overwriting stale/corrupt copies
+                if let Err(e) = super::bundled::extract_bundled(&binary_path) {
+                    tracing::error!("Failed to re-extract trojan-go binary: {}", e);
+                    continue;
+                }
+                #[cfg(not(windows))]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = tokio::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o755)).await;
                 }
 
                 // Rewrite config (in case it was deleted)

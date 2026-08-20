@@ -34,12 +34,20 @@ for pair in "${PAIRS[@]}"; do
   echo "Extracting $asset to $DEST ..."
   unzip -o "$zip_path" -d "$DEST" 2>/dev/null || true
 
-  # The zip extracts as "trojan-go"; rename to our neutral name.
+  # The zip extracts as "trojan-go" (or "trojan-go.exe" on Windows);
+  # rename to our neutral name.
   if [ -f "$DEST/trojan-go" ]; then
     if [ ! -f "$dest_path" ]; then
       mv "$DEST/trojan-go" "$dest_path"
     else
       rm "$DEST/trojan-go"
+    fi
+  fi
+  if [ -f "$DEST/trojan-go.exe" ]; then
+    if [ ! -f "$dest_path" ]; then
+      mv "$DEST/trojan-go.exe" "$dest_path"
+    else
+      rm "$DEST/trojan-go.exe"
     fi
   fi
 
