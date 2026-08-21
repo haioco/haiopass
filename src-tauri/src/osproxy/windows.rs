@@ -37,6 +37,13 @@ pub fn clear_proxy() -> crate::error::Result<()> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let key = hkcu.open_subkey_with_flags(INTERNET_SETTINGS, KEY_WRITE)?;
     key.set_value("ProxyEnable", &0u32)?;
+    // Critical: must delete AutoConfigURL, otherwise Windows keeps using the PAC
+    // even when ProxyEnable is 0, so the VPN appears to stay connected after
+    // disconnect. See issue: disable shows "disconnected" but traffic still proxied.
+    let _ = key.delete_value("AutoConfigURL");
+    let _ = key.delete_value("AutoConfigURLBackup");
+    // Also clear any manual ProxyServer left over to avoid confusion
+    let _ = key.delete_value("ProxyServer");
     broadcast_settings_change();
     Ok(())
 }

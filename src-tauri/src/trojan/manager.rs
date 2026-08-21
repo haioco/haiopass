@@ -114,7 +114,38 @@ impl TrojanManager {
             let _ = child.wait().await;
             tracing::info!("Stopped trojan-go");
         }
+        // Watchdog spawns orphan processes not tracked in self.child.
+        // Ensure any stray haio-proxy instance is killed on disconnect,
+        // otherwise VPN appears to stay connected after UI shows disconnected.
+        Self::kill_stray_processes().await;
         Ok(())
+    }
+
+    async fn kill_stray_processes() {
+        // Best-effort: kill any lingering haio-proxy process by image name.
+        // This covers watchdog-orphaned children that are not in self.child.
+        #[cfg(windows)]
+        {
+            let _ = tokio::process::Command::new("taskkill")
+                .args(["/F", "/IM", "haio-proxy.exe", "/T"])
+                .output()
+                .await;
+        }
+        #[cfg(not(windows))]
+        {
+            // pkill -9 by exact name; ignore errors if not found
+            let _ = tokio::process::Command::new("pkill")
+                .args(["-9", "-x", "haio-proxy"])
+                .output()
+                .await;
+            // Fallback: pkill -f for full path match
+            let _ = tokio::process::Command::new("pkill")
+                .args(["-9", "-f", "haio-proxy"])
+                .output()
+                .await;
+        }
+        // Give OS time to release the SOCKS port
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
 
     pub fn status(&mut self) -> (bool, Option<u32>) {

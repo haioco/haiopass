@@ -116,6 +116,15 @@ pub async fn disable_proxy(
     app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
     let state = app_handle.state::<std::sync::Arc<AppState>>();
+    // Mark disabled FIRST so health-monitor / watchdog see enabled==false
+    // and do not restart the VPN right after we stop it.
+    {
+        let mut config = state.config.write().await;
+        config.get_mut().enabled = false;
+        let _ = config.save();
+    }
+    let _ = app_handle.emit("status:update", serde_json::json!({"enabled": false}));
+
     // Stop the background interval
     {
         let mut interval_handle = state.interval_handle.write().await;
@@ -504,6 +513,11 @@ fn start_health_monitor(
                 // If SOCKS5 is down but trojan manager says it should be running,
                 // try to signal the watchdog to restart
                 if !health.socks5_ok && consecutive_failures >= 2 {
+                    // Re-check enabled — user may have clicked Disconnect while we were checking
+                    let still_enabled = { state.config.read().await.get().enabled };
+                    if !still_enabled {
+                        break;
+                    }
                     let mut trojan = state.trojan.write().await;
                     let (running, _) = trojan.status();
                     if running {
@@ -514,6 +528,10 @@ fn start_health_monitor(
 
                     // If HTTP proxy is also down, restart the whole proxy stack
                     if !health.http_proxy_ok && consecutive_failures >= 3 {
+                        let still_enabled2 = { state.config.read().await.get().enabled };
+                        if !still_enabled2 {
+                            break;
+                        }
                         tracing::warn!("Full proxy stack down, attempting restart");
                         drop(trojan);
                         // The enable_proxy command would need to be called from frontend,
