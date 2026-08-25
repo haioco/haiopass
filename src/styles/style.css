@@ -193,6 +193,15 @@ header { display: flex; align-items: center; justify-content: space-between; }
 }
 .btn-settings:hover { background: #e2e8f0; color: #1e293b; }
 
+/* Delete config */
+.btn-delete-config {
+  background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; padding: 8px;
+  border-radius: 10px; cursor: pointer; font-size: 12px; font-weight: 600;
+  text-align: center; transition: all 0.2s; width: 100%;
+}
+.btn-delete-config:hover { background: #fee2e2; color: #b91c1c; }
+.btn-delete-config.confirming { background: #dc2626; border-color: #dc2626; color: #ffffff; }
+
 .settings-panel { display: flex; flex-direction: column; gap: 10px; }
 .settings-header { display: flex; align-items: center; justify-content: space-between; }
 .btn-back { background: none; border: none; color: #667eea; cursor: pointer; font-size: 12px; font-weight: 600; }

@@ -221,6 +221,49 @@ saveConfigBtn.addEventListener('click', async () => {
   }
 });
 
+// Delete config — two-click confirm, auto-disconnects if proxy is active
+const btnDeleteConfig = document.getElementById('btnDeleteConfig');
+let deleteArmed = null;
+btnDeleteConfig.addEventListener('click', async () => {
+  const t = translations[currentLang];
+  if (!deleteArmed) {
+    btnDeleteConfig.classList.add('confirming');
+    btnDeleteConfig.textContent = t.deleteConfirm;
+    deleteArmed = setTimeout(() => {
+      btnDeleteConfig.classList.remove('confirming');
+      btnDeleteConfig.textContent = t.deleteConfig;
+      deleteArmed = null;
+    }, 3000);
+    return;
+  }
+  clearTimeout(deleteArmed);
+  deleteArmed = null;
+  btnDeleteConfig.classList.remove('confirming');
+  btnDeleteConfig.disabled = true;
+  try {
+    const res = await invoke('delete_config');
+    if (res && res.success) {
+      configInput.value = '';
+      setConfigStatus('', null);
+      toggle.checked = false;
+      statusBadge.textContent = 'OFF';
+      statusBadge.classList.remove('on');
+      btnSetup.disabled = true;
+      trojanStatus.classList.add('hidden');
+      mainControls.classList.add('hidden');
+      document.getElementById('settingsPanel').classList.add('hidden');
+      configOnlyCard.classList.remove('hidden');
+      showError(null);
+    } else {
+      showError(res.error || 'Delete failed');
+    }
+  } catch (e) {
+    showError(String(e) || 'Delete failed');
+  }
+  btnDeleteConfig.textContent = t.deleteConfig;
+  btnDeleteConfig.disabled = false;
+});
+
 toggle.addEventListener('change', async () => {
   const t = translations[currentLang];
   showError(null);

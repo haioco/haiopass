@@ -30,6 +30,8 @@ export const translations = {
     refreshDomains: 'بروزرسانی دامنه\u200cها',
     domainsLink: 'مشاهده لیست دامنه\u200cها',
     lastFetch: 'آخرین بروزرسانی',
+    deleteConfig: 'حذف کانفیگ',
+    deleteConfirm: 'مطمئنید؟ دوباره کلیک کنید',
   },
   en: {
     appName: 'HaioBypass',
@@ -62,5 +64,7 @@ export const translations = {
     refreshDomains: 'Refresh domains',
     domainsLink: 'View domain list',
     lastFetch: 'Last updated',
+    deleteConfig: 'Delete Config',
+    deleteConfirm: 'Sure? Click again',
   }
 };

@@ -245,6 +245,25 @@ pub async fn save_config(
 }
 
 #[tauri::command]
+pub async fn delete_config(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+) -> Result<serde_json::Value, String> {
+    // Disconnect first so the saved config is not in use by a running proxy
+    let enabled = { state.config.read().await.get().enabled };
+    if enabled {
+        disable_proxy(app_handle).await?;
+    }
+
+    let mut config = state.config.write().await;
+    config.get_mut().trojan_url = String::new();
+    config.get_mut().trojan_config = None;
+    config.save().map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({ "success": true }))
+}
+
+#[tauri::command]
 pub async fn get_state(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
 ) -> Result<serde_json::Value, String> {

@@ -88,6 +88,7 @@ pub fn run() {
             app::commands::get_status,
             app::commands::test_connection,
             app::commands::save_config,
+            app::commands::delete_config,
             app::commands::get_state,
             app::commands::set_state,
             app::commands::install_and_start_trojan,
