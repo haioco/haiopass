@@ -133,6 +133,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Node.js (for tauri signer)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Generate + upload signed updater manifest (latest.json)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bash scripts/generate-updater-json.sh
+
       - name: Update release to published
         run: |
           gh release edit ${{ github.ref_name }} --repo haioco/haiopass --draft=false
