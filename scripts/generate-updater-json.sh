@@ -33,7 +33,8 @@ for entry in "${WANTS[@]}"; do
   asset="${entry%%|*}"
   plat="${entry##*|}"
   url="${BASE}/${asset}"
-  if ! curl -fsSL --retry 3 -o "$asset" "$url"; then
+  # gh release download works on draft releases (public curl URLs do not)
+  if ! gh release download "$TAG" --repo "$REPO" --dir . --pattern "$asset" --clobber; then
     echo "!! skip ${plat}: asset not found (${asset})" >&2
     continue
   fi
