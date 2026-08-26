@@ -46,6 +46,8 @@ pub fn run() {
             let _ = std::process::Command::new("gsettings")
                 .args(["set", "org.gnome.system.proxy", "mode", "'none'"])
                 .output();
+            // Remove stale QUIC block rule from previous session
+            let _ = osproxy::quic::unblock();
         }
         prev_hook(info);
     }));
@@ -63,6 +65,8 @@ pub fn run() {
         let _ = std::process::Command::new("gsettings")
             .args(["set", "org.gnome.system.proxy", "mode", "'none'"])
             .output();
+        // Remove stale QUIC block rule left by the crashed session
+        let _ = osproxy::quic::unblock();
     }
 
     let state = Arc::new(AppState {
