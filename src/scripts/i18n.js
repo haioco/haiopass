@@ -32,6 +32,10 @@ export const translations = {
     lastFetch: 'آخرین بروزرسانی',
     deleteConfig: 'حذف کانفیگ',
     deleteConfirm: 'مطمئنید؟ دوباره کلیک کنید',
+    updateAvailable: 'نسخه جدید {v} موجود است',
+    installUpdate: 'نصب و راه‌اندازی مجدد',
+    updating: 'در حال بروزرسانی…',
+    updateUpToDate: 'آخرین نسخه نصب شده است',
   },
   en: {
     appName: 'HaioBypass',
@@ -66,5 +70,9 @@ export const translations = {
     lastFetch: 'Last updated',
     deleteConfig: 'Delete Config',
     deleteConfirm: 'Sure? Click again',
+    updateAvailable: 'New version {v} is available',
+    installUpdate: 'Install & Restart',
+    updating: 'Updating\u2026',
+    updateUpToDate: 'Up to date',
   }
 };

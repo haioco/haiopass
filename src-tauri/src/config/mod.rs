@@ -44,6 +44,8 @@ pub struct State {
     pub autostart: bool,
     #[serde(default = "default_minimize_to_tray")]
     pub minimize_to_tray: bool,
+    #[serde(default)]
+    pub last_update_at: Option<i64>,
 }
 
 fn default_enabled() -> bool { false }
@@ -68,6 +70,7 @@ impl Default for State {
             enabled_presets: vec!["gradle".into()],
             autostart: false,
             minimize_to_tray: true,
+            last_update_at: None,
         }
     }
 }

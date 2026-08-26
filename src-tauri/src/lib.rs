@@ -14,6 +14,7 @@ pub mod error;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tauri::Manager;
+use tauri::Emitter;
 
 pub struct AppState {
     pub config: Arc<RwLock<config::Store>>,
@@ -85,6 +86,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             app::commands::enable_proxy,
@@ -103,6 +105,7 @@ pub fn run() {
             app::commands::set_autostart,
             app::commands::set_proxy_port,
             app::commands::check_for_updates,
+            app::commands::install_update,
             app::commands::quit_and_restore,
         ])
         .setup(move |app| {
@@ -121,6 +124,25 @@ pub fn run() {
                 drop(config);
                 if enabled {
                     let _ = crate::app::commands::enable_proxy(enable_handle).await;
+                }
+            });
+
+            // Background update check on startup — emits update:available
+            let update_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                match crate::updater::check(&update_handle).await {
+                    Ok(Some(update)) => {
+                        tracing::info!("Update available: v{}", update.version);
+                        let _ = update_handle.emit(
+                            "update:available",
+                            serde_json::json!({
+                                "version": update.version,
+                                "notes": update.notes,
+                            }),
+                        );
+                    }
+                    Ok(None) => tracing::info!("App is up to date"),
+                    Err(e) => tracing::warn!("Startup update check failed: {}", e),
                 }
             });
 

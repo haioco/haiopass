@@ -13,12 +13,20 @@
       <div class="header-left">
         <img src="assets/icons/logo.png" class="logo-img" alt="Haio" />
         <span class="app-name" data-i18n="appName">HaioBypass</span>
+        <span class="version-badge" id="appVersion" title=""></span>
       </div>
       <div class="header-right">
         <button class="lang-toggle" id="langToggle">EN</button>
         <span class="status-badge" id="statusBadge">OFF</span>
       </div>
     </header>
+
+    <!-- Update banner -->
+    <div class="update-banner hidden" id="updateBanner">
+      <span class="update-icon">&#11014;&#65039;</span>
+      <span class="update-text" id="updateText"></span>
+      <button class="btn-update" id="btnInstallUpdate"></button>
+    </div>
 
     <!-- Initial config-only view -->
     <div class="card config-only" id="configOnlyCard">

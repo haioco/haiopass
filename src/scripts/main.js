@@ -23,10 +23,15 @@ const mainControls   = document.getElementById('mainControls');
 const btnSetup       = document.getElementById('btnSetup');
 const trojanStatus   = document.getElementById('trojanStatus');
 const trojanStatusText = document.getElementById('trojanStatusText');
+const appVersion     = document.getElementById('appVersion');
+const updateBanner   = document.getElementById('updateBanner');
+const updateText     = document.getElementById('updateText');
+const btnInstallUpdate = document.getElementById('btnInstallUpdate');
 
 let currentLang = 'en';
 let lastRefreshTime = 0;
 let domainSourceUrl = '';
+let pendingUpdate = null;
 
 function setLanguage(lang) {
   currentLang = lang;
@@ -44,6 +49,8 @@ function setLanguage(lang) {
     const key = el.getAttribute('data-i18n-placeholder');
     if (t[key]) el.placeholder = t[key];
   });
+
+  if (pendingUpdate) renderUpdateBanner();
 
   if (toggle.checked) {
     toggleTitle.textContent = t.proxyActive;
@@ -142,6 +149,45 @@ function updateDomainMeta(data) {
   }
 }
 
+function renderUpdateBanner() {
+  const t = translations[currentLang];
+  if (!pendingUpdate) {
+    updateBanner.classList.add('hidden');
+    return;
+  }
+  updateText.textContent = t.updateAvailable.replace('{v}', 'v' + pendingUpdate.version);
+  btnInstallUpdate.textContent = t.installUpdate;
+  updateBanner.classList.remove('hidden');
+}
+
+btnInstallUpdate.addEventListener('click', async () => {
+  const t = translations[currentLang];
+  btnInstallUpdate.disabled = true;
+  setLoading(true, t.updating);
+  try {
+    await invoke('install_update');
+    // App restarts itself on success; if we get here something went wrong
+    setLoading(false);
+    showError('Update finished but restart did not happen. Please restart the app.');
+  } catch (e) {
+    setLoading(false);
+    showError(String(e) || 'Update failed');
+    btnInstallUpdate.disabled = false;
+  }
+});
+
+async function checkForUpdates() {
+  try {
+    const res = await invoke('check_for_updates');
+    if (res && res.available) {
+      pendingUpdate = { version: res.version, notes: res.notes };
+      renderUpdateBanner();
+    }
+  } catch (e) {
+    // Non-fatal — updater endpoint may be unreachable
+  }
+}
+
 async function loadStatus() {
   const data = await invoke('get_status');
   const t = translations[currentLang];
@@ -170,6 +216,14 @@ async function loadStatus() {
   }
 
   if (data.httpProxyPort) portInput.value = data.httpProxyPort;
+
+  if (data.version) {
+    appVersion.textContent = 'v' + data.version;
+    const t = translations[currentLang];
+    appVersion.title = data.lastUpdateAt
+      ? `${t.lastFetch}: ${formatTimestamp(data.lastUpdateAt)}`
+      : t.updateUpToDate;
+  }
 
   if (enabled) {
     runHealthCheck();
@@ -361,6 +415,11 @@ listen('status:update', (data) => {
   loadStatus();
 });
 
+listen('update:available', (data) => {
+  pendingUpdate = { version: data.version, notes: data.notes };
+  renderUpdateBanner();
+});
+
 listen('trojan:status', (data) => {
   if (data.running) {
     btnSetup.textContent = '\u2713 Running';
@@ -391,3 +450,4 @@ document.getElementById('btnBack').addEventListener('click', () => {
 setLanguage('en');
 loadConfig();
 loadStatus();
+checkForUpdates();

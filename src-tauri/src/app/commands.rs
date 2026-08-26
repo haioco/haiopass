@@ -186,6 +186,7 @@ pub async fn disable_proxy(
 
 #[tauri::command]
 pub async fn get_status(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, std::sync::Arc<AppState>>,
 ) -> Result<serde_json::Value, String> {
     let config = state.config.read().await;
@@ -203,6 +204,8 @@ pub async fn get_status(
         "enabledPresets": s.enabled_presets,
         "autostart": s.autostart,
         "domainSourceUrl": crate::domains::fallback::DOMAINS_URLS[0],
+        "version": app_handle.package_info().version.to_string(),
+        "lastUpdateAt": s.last_update_at,
     }))
 }
 
@@ -401,9 +404,48 @@ pub async fn set_proxy_port(
 
 #[tauri::command]
 pub async fn check_for_updates(
-    _state: tauri::State<'_, std::sync::Arc<AppState>>,
+    app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!({ "available": false }))
+    let current = app_handle.package_info().version.to_string();
+    match crate::updater::check(&app_handle).await {
+        Ok(Some(update)) => Ok(serde_json::json!({
+            "available": true,
+            "version": update.version,
+            "notes": update.notes,
+            "currentVersion": current,
+        })),
+        Ok(None) => Ok(serde_json::json!({
+            "available": false,
+            "currentVersion": current,
+        })),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn install_update(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+) -> Result<serde_json::Value, String> {
+    // Record when the update is installed before the app restarts itself
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    {
+        let mut config = state.config.write().await;
+        config.get_mut().last_update_at = Some(now);
+        let _ = config.save();
+    }
+
+    crate::updater::download_and_install(&app_handle)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Restart into the new version
+    app_handle.restart();
+    #[allow(unreachable_code)]
+    Ok(serde_json::json!({ "success": true }))
 }
 
 #[tauri::command]
