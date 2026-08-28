@@ -6,6 +6,8 @@ Cross-platform desktop app (Windows, Linux, macOS) that replaces the HaioBypass 
 
 Routes filtered domains (YouTube, X, Instagram, etc.) through a Haio Trojan proxy while leaving all other traffic direct — exactly like the browser extension, but at the OS level.
 
+For anti-sanction (تحریم‌شکن) info, visit: https://haio.ir/%D8%AA%D8%AD%D8%B1%DB%8C%D9%85-%D8%B4%DA%A9%D9%86/
+
 ## Architecture
 
 - **Tauri v2** (Rust backend + web frontend)
