@@ -11,3 +11,6 @@ perf.data
 __pycache__/
 # Tauri auto-generated schema snapshot (regenerated on build)
 src-tauri/gen/schemas/
+# Windows 7 offline WebView2 (large, fetched at CI)
+resources/webview2/
+!resources/webview2/.gitkeep

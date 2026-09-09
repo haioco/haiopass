@@ -23,8 +23,8 @@ for pair in "${PAIRS[@]}"; do
   zip_path="/tmp/haio-$asset"
   dest_path="$DEST/$binary_name"
 
-  if [ -f "$dest_path" ]; then
-    echo "✓ $dest_path already exists, skipping"
+  if [ -f "$dest_path" ] && [ "${FORCE:-}" != "1" ]; then
+    echo "✓ $dest_path already exists, skipping (FORCE=1 to re-download)"
     continue
   fi
 

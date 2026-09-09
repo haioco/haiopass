@@ -2,8 +2,12 @@ use std::path::Path;
 
 // Binaries are downloaded by scripts/fetch-trojan.sh from upstream trojan-go
 // releases and rebranded as haio-proxy-* to reduce AV false-positives.
+// Windows binary MUST be built with Go 1.20.x to remain compatible with
+// Windows 7 (Go 1.21+ drops Win7). CI rebuilds with golang:1.20 for win7 artifact.
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 const EMBEDDED_BYTES: &[u8] = include_bytes!("../../../resources/trojan-go/haio-proxy-windows-amd64.exe");
+#[cfg(all(target_os = "windows", target_arch = "x86"))]
+const EMBEDDED_BYTES: &[u8] = include_bytes!("../../../resources/trojan-go/haio-proxy-windows-386.exe");
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const EMBEDDED_BYTES: &[u8] = include_bytes!("../../../resources/trojan-go/haio-proxy-linux-amd64");
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]

@@ -19,6 +19,11 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            variant: win10
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            variant: win7
+            config: src-tauri/tauri.win7.conf.json
           - platform: macos-latest
             target: aarch64-apple-darwin
           - platform: macos-latest
@@ -32,6 +37,18 @@ jobs:
       - name: Download bundled haio-proxy binaries
         shell: bash
         run: bash scripts/fetch-trojan.sh
+
+      - name: Prepare Windows 7 offline WebView2 109 (win7 variant)
+        if: matrix.variant == 'win7'
+        shell: bash
+        run: |
+          bash scripts/fetch-webview2-109.sh || echo "⚠ WebView2 109 download failed — build will use placeholder, manually populate resources/webview2/"
+          ls -lh resources/webview2/ || true
+          # Win7 trojan-go must be Go 1.20-built; if docker available rebuild, else reuse existing
+          if command -v docker >/dev/null 2>&1; then
+            bash scripts/build-trojan-win7.sh || echo "⚠ Win7 trojan rebuild failed, using existing binary"
+          fi
+          ls -lh resources/trojan-go/
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -61,7 +78,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: .
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} ${{ matrix.config && format('--config {0}', matrix.config) || '' }}
           tagName: ${{ github.ref_name }}
           releaseName: 'HaioBypass ${{ github.ref_name }}'
           releaseBody: 'See the assets to download this version.'
