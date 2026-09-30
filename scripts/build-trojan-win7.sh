@@ -21,8 +21,20 @@ if command -v docker >/dev/null 2>&1; then
   git clone --depth 1 "$REPO" "$TMPDIR"
 
   echo "Building with golang:${GO_VERSION} ..."
+  # On Windows (Git Bash), MSYS auto-converts Unix paths in arguments and
+  # mangles "host:container" volume specs (":/src" becomes
+  # ";C:\Program Files\Git\src"). Disable conversion and pass Windows
+  # paths explicitly so Docker receives a valid volume specification.
+  if command -v cygpath >/dev/null 2>&1; then
+    export MSYS_NO_PATHCONV=1
+    TMPDIR_MOUNT="$(cygpath -w "$TMPDIR")"
+    DEST_MOUNT="$(cygpath -w "$DEST")"
+  else
+    TMPDIR_MOUNT="$TMPDIR"
+    DEST_MOUNT="$DEST"
+  fi
   # Build inside docker, output to host via volume
-  docker run --rm -v "$TMPDIR":/src -w /src "golang:${GO_VERSION}" bash -c "
+  docker run --rm -v "${TMPDIR_MOUNT}:/src" -w /src "golang:${GO_VERSION}" bash -c "
     set -e
     go env -w GOOS=windows GOARCH=amd64
     go build -ldflags '-H windowsgui -s -w' -o /tmp/haio-proxy-windows-amd64.exe .
@@ -30,7 +42,7 @@ if command -v docker >/dev/null 2>&1; then
   "
   # Copy out via docker cp alternative: use volume mount for /tmp
   # Instead rebuild with output to mounted dir
-  docker run --rm -v "$TMPDIR":/src -v "$DEST":/out -w /src "golang:${GO_VERSION}" bash -c "
+  docker run --rm -v "${TMPDIR_MOUNT}:/src" -v "${DEST_MOUNT}:/out" -w /src "golang:${GO_VERSION}" bash -c "
     set -e
     GOOS=windows GOARCH=amd64 go build -ldflags '-H windowsgui -s -w' -o /out/haio-proxy-windows-amd64.exe .
   "
