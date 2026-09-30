@@ -49,6 +49,13 @@ jobs:
             bash scripts/build-trojan-win7.sh || echo "⚠ Win7 trojan rebuild failed, using existing binary"
           fi
           ls -lh resources/trojan-go/
+          # fixedRuntime mode requires the staged runtime dir to exist;
+          # fail early with a clear message instead of a cryptic bundle error.
+          if [ ! -d resources/webview2/WebView2FixedRuntime109 ] || [ -z "$(ls -A resources/webview2/WebView2FixedRuntime109 2>/dev/null)" ]; then
+            echo "✗ WebView2 fixed runtime missing at resources/webview2/WebView2FixedRuntime109 — win7 build cannot proceed"
+            exit 1
+          fi
+          echo "✓ WebView2 fixed runtime staged"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
