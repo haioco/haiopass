@@ -10,6 +10,7 @@ pub mod health;
 pub mod tray;
 pub mod updater;
 pub mod error;
+pub mod webview_check;
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -35,6 +36,11 @@ pub fn run() {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .try_init();
+
+    // Must run before any window exists: a missing WebView2 runtime (typically
+    // after an auto-update, or when it was installed for another Windows
+    // account) makes the webview fail with an opaque error box.
+    webview_check::preflight();
 
     // Register panic hook for crash sentinel
     let prev_hook = std::panic::take_hook();

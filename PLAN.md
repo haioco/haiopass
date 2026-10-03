@@ -275,7 +275,13 @@ make build          # tauri build → NSIS/AppImage/.deb/.dmg
 - Docker daemon proxy needs root → v1 only config.json
 - Auto-updater signing keys → CI secrets only
 - **v2.0.0 note:** Windows uses `offlineInstaller` for WebView2 (~150MB installer) to
-  eliminate post-update "WebView2 not found" tickets. Linux `.deb` declares
+  eliminate post-update "WebView2 not found" tickets. In addition `webview_check::preflight()`
+  runs before any window is created: it detects the runtime via the EdgeUpdate client GUID in
+  HKLM/HKCU, and when missing downloads the official Evergreen installer over HTTPS and runs it
+  silently for the current user (24h cooldown marker so a persistent failure is not retried on
+  every launch). If it still cannot be repaired it shows a native Persian+English dialog with the
+  manual link instead of Tauri's opaque English error. A bundled `WebView2FixedRuntime*` folder
+  next to the exe (win7 build) counts as available. Linux `.deb` declares
   `libwebkit2gtk-4.1-0` + `libayatana-appindicator3-1` as depends (AppImage users must
   have webkit installed on the host). macOS uses built-in WKWebView, no action needed.
 - **Naming rule (v2+):** never expose protocol names in the UI. Backend keeps
