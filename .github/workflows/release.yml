@@ -38,6 +38,20 @@ jobs:
         shell: bash
         run: bash scripts/fetch-trojan.sh
 
+      - name: Prepare fixed WebView2 runtime (win10 variant)
+        if: matrix.variant == 'win10'
+        shell: bash
+        run: |
+          bash scripts/fetch-webview2-fixed.sh || echo "⚠ WebView2 fixed runtime download failed"
+          ls -lh resources/webview2/ || true
+          # fixedRuntime mode requires the staged runtime dir to exist;
+          # fail early with a clear message instead of a cryptic bundle error.
+          if [ ! -d resources/webview2/WebView2FixedRuntime ] || [ -z "$(ls -A resources/webview2/WebView2FixedRuntime 2>/dev/null)" ]; then
+            echo "✗ WebView2 fixed runtime missing at resources/webview2/WebView2FixedRuntime — win10 build cannot proceed"
+            exit 1
+          fi
+          echo "✓ WebView2 fixed runtime staged"
+
       - name: Prepare Windows 7 offline WebView2 109 (win7 variant)
         if: matrix.variant == 'win7'
         shell: bash

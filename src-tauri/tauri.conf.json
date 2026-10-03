@@ -42,8 +42,10 @@
         "displayLanguageSelector": true
       },
       "webviewInstallMode": {
-        "type": "offlineInstaller"
-      }
+        "type": "fixedRuntime",
+        "path": "../resources/webview2/WebView2FixedRuntime"
+      },
+      "wix": null
     },
     "linux": {
       "appimage": { "bundleMediaFramework": false },
