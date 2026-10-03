@@ -228,7 +228,7 @@ pub async fn save_config(
     trojan_url: String,
 ) -> Result<serde_json::Value, String> {
     let parsed = crate::config::trojan_url::parse_trojan_url(&trojan_url)
-        .ok_or("Invalid trojan:// URL")?;
+        .ok_or("Invalid access key")?;
 
     let mut config = state.config.write().await;
     config.get_mut().trojan_url = trojan_url;
@@ -293,7 +293,7 @@ pub async fn install_and_start_trojan(
         let config = state.config.read().await;
         config.get().trojan_config.clone()
     };
-    let tc = tc.ok_or("No trojan config saved. Save a config first.")?;
+    let tc = tc.ok_or("No access key saved. Save a key first.")?;
     let port = {
         let config = state.config.read().await;
         config.get().proxy_port

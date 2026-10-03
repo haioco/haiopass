@@ -31,14 +31,14 @@
     <!-- Initial config-only view -->
     <div class="card config-only" id="configOnlyCard">
       <div class="card-header">
-        <span class="card-label" data-i18n="configLabel">Your Trojan Config</span>
+        <span class="card-label" data-i18n="configLabel">Your Access Key</span>
       </div>
       <textarea
         id="configInput"
         class="config-box config-input"
         rows="3"
         spellcheck="false"
-        placeholder="trojan://..." data-i18n-placeholder="configPlaceholder"></textarea>
+        placeholder="haio://..." data-i18n-placeholder="configPlaceholder"></textarea>
       <div class="config-actions">
         <span class="config-status" id="configStatus"></span>
         <button class="btn-save" id="saveConfigBtn" data-i18n="saveConfig">Save Config</button>
@@ -71,16 +71,16 @@
         <button class="btn-refresh" id="btnRefreshDomains" data-i18n="refreshDomains">Refresh domains</button>
       </div>
 
-      <!-- Trojan setup -->
+      <!-- Cloud engine setup -->
       <div class="card setup-card" id="setupCard">
         <div class="card-header">
-          <span class="card-label" data-i18n="setupLabel">Trojan Client</span>
+          <span class="card-label" data-i18n="setupLabel">Cloud Engine</span>
         </div>
         <div class="setup-body">
           <p class="setup-desc" data-i18n="setupDesc">
-            The proxy needs the Trojan client running locally. Click to install and start it.
+            The proxy needs the cloud engine running locally. Click to install and start it.
           </p>
-          <button class="btn-dl" id="btnSetup" data-i18n="installStart">Install Trojan &amp; Start</button>
+          <button class="btn-dl" id="btnSetup" data-i18n="installStart">Install Engine &amp; Start</button>
           <div id="trojanStatus" class="setup-status hidden">
             <span class="conn-dot connected"></span>
             <span id="trojanStatusText">Running</span>

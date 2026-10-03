@@ -103,9 +103,9 @@ async function runHealthCheck() {
   }
 }
 
-function parseTrojanUrl(uri) {
+function parseAccessKey(uri) {
   const m = (uri || '').trim().match(
-    /^trojan:\/\/([^@]+)@([^:/?#]+):(\d+)(?:\?([^#]*))?/i
+    /^(?:trojan|haio):\/\/([^@]+)@([^:/?#]+):(\d+)(?:\?([^#]*))?/i
   );
   if (!m) return null;
   const password = decodeURIComponent(m[1]);
@@ -236,7 +236,7 @@ async function loadConfig() {
   const state = await invoke('get_state');
   if (state.trojanUrl) {
     configInput.value = state.trojanUrl;
-    const parsed = parseTrojanUrl(state.trojanUrl);
+    const parsed = parseAccessKey(state.trojanUrl);
     if (parsed) {
       setConfigStatus(`\u2713 ${parsed.server}:${parsed.port}`, true);
       configOnlyCard.classList.add('hidden');
@@ -257,9 +257,9 @@ async function loadConfig() {
 
 saveConfigBtn.addEventListener('click', async () => {
   const t = translations[currentLang];
-  const parsed = parseTrojanUrl(configInput.value);
+  const parsed = parseAccessKey(configInput.value);
   if (!parsed) {
-    setConfigStatus('\u2717 Invalid trojan:// URL', false);
+    setConfigStatus('\u2717 Invalid access key', false);
     return;
   }
   const res = await invoke('save_config', { trojanUrl: parsed.raw });
@@ -368,7 +368,7 @@ btnSetup.addEventListener('click', async () => {
     btnSetup.textContent = '\u2713 Running';
     btnSetup.disabled = true;
     trojanStatus.classList.remove('hidden');
-    trojanStatusText.textContent = 'Trojan client is running';
+    trojanStatusText.textContent = 'Cloud engine is running';
   } else {
     showError(res.error || 'Install failed');
   }

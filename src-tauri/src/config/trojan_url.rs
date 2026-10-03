@@ -2,8 +2,9 @@ use crate::config::TrojanConfig;
 
 pub fn parse_trojan_url(uri: &str) -> Option<TrojanConfig> {
     let uri = uri.trim();
+    // Accept both legacy trojan:// and new haio:// scheme (same wire format).
     let re = regex::Regex::new(
-        r"(?i)^trojan://([^@]+)@([^:/?#]+):(\d+)(?:\?([^#]*))?"
+        r"(?i)^(?:trojan|haio)://([^@]+)@([^:/?#]+):(\d+)(?:\?([^#]*))?"
     ).ok()?;
 
     let caps = re.captures(uri)?;
@@ -54,6 +55,13 @@ mod tests {
     fn test_parse_no_sni() {
         let cfg = parse_trojan_url("trojan://pass@1.2.3.4:443").unwrap();
         assert_eq!(cfg.sni, "1.2.3.4");
+    }
+
+    #[test]
+    fn test_parse_haio_scheme() {
+        let cfg = parse_trojan_url("haio://pass@1.2.3.4:443?sni=example.com").unwrap();
+        assert_eq!(cfg.server, "1.2.3.4");
+        assert_eq!(cfg.sni, "example.com");
     }
 
     #[test]
