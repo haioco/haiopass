@@ -9,10 +9,6 @@
 //! We detect the runtime before any window exists and try to repair it silently,
 //! falling back to a native (webview-free) dialog with the manual download link.
 
-/// Official Microsoft Evergreen standalone installer (x64).
-#[cfg(target_os = "windows")]
-const EVERGREEN_X64: &str = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
-
 #[cfg(target_os = "windows")]
 mod imp {
     use std::path::{Path, PathBuf};
@@ -20,6 +16,8 @@ mod imp {
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
     use winreg::RegKey;
 
+    /// Official Microsoft Evergreen standalone installer (x64).
+    const EVERGREEN_X64: &str = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
     /// WebView2 "Evergreen" runtime EdgeUpdate client GUID.
     const CLIENT_GUID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
     const RETRY_COOLDOWN: Duration = Duration::from_secs(24 * 60 * 60);
