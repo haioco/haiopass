@@ -274,3 +274,49 @@ make build          # tauri build → NSIS/AppImage/.deb/.dmg
 - Bundled binary AV false positives → document exclusion + codesign
 - Docker daemon proxy needs root → v1 only config.json
 - Auto-updater signing keys → CI secrets only
+- **v2.0.0 note:** Windows uses `offlineInstaller` for WebView2 (~150MB installer) to
+  eliminate post-update "WebView2 not found" tickets. Linux `.deb` declares
+  `libwebkit2gtk-4.1-0` + `libayatana-appindicator3-1` as depends (AppImage users must
+  have webkit installed on the host). macOS uses built-in WKWebView, no action needed.
+- **Naming rule (v2+):** never expose protocol names in the UI. Backend keeps
+  `trojan://` parsing (+ `haio://` alias, same wire format); UI says Access Key /
+  Cloud Engine / Haio Cloud only.
+
+## 9. v3 — Haio Cloud Agent (native, no webview)
+
+**Vision:** HaioBypass v2 is a proxy GUI. v3 is an always-on device agent for Haio Cloud
+access — Cloudflare One / WARP model: background service, full-device routing (TUN),
+split-tunnel policies, device identity + posture, MDM/enterprise deploy. Works before
+login, headless with tray, on every device (Win/Linux/macOS + Android/iOS later).
+
+**Why native (no webview shell):**
+1. Zero WebView2/WebKit runtime dependency — entire ticket class disappears, offline
+   MSI install works everywhere including locked-down enterprise machines.
+2. Runs as a real service — Windows Service / LaunchDaemon / systemd unit. A webview
+   app must keep a visible window alive; an agent runs headless + tray only.
+3. TUN / virtual-NIC path for full-device routing (not just HTTP CONNECT on 11032).
+   Needs driver/adapter management + sleep/network-change handling that webview
+   shells do poorly.
+4. Enterprise deploy — signed MSI + GPO/Intune, per-machine install, device certs.
+5. Lower footprint — ~10MB RAM service vs 200MB+ webview/Electron; smaller attack
+   surface; fewer AV false positives than bundled `trojan-go.exe` + bootstrapper.
+
+**Options:**
+| | Reuse of current Rust core | Platforms | Effort |
+|---|---|---|---|
+| A. Pure-Rust `egui` shell | 100% (same process) | Win/Linux/macOS | Lowest (S/M) |
+| B. Rust service + thin native UI (WinUI3 / SwiftUI / GTK) | 100% (service via IPC) | Best per-OS UX | Medium |
+| C. Flutter (single codebase → mobile later) | Backend stays Rust sidecar or port to Dart | All + Android/iOS | Highest, but only path to mobile agent |
+
+**Recommendation:** A for v3.0 desktop (fastest, keeps proxy/router/osproxy/trojan-mgr
+code as-is, just replaces the Tauri webview shell), with the Rust core already split as
+a headless service so B/C can reuse it. Mobile agent (Android/iOS) is a separate
+decision — C only if mobile is committed.
+
+**v3 scope (draft):**
+- Headless core service: config, domain routing, proxy engine, health, auto-update
+- TUN adapter + split-tunnel (domain/IP rules from Haio Cloud, cached offline)
+- Device identity: enrollment token → device cert, posture signal (OS/version)
+- Tray-only UI: status, connect/disconnect, access-key entry, diagnostics export
+- Branding: "Haio Cloud Agent" product name; `haio://` keys only (keep reading
+  legacy `trojan://` silently); no protocol names anywhere user-visible
