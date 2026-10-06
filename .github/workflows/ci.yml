@@ -73,11 +73,25 @@ jobs:
       - name: Build installer (compile check)
         run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis --config ${{ matrix.config }}
 
+      - name: Locate built installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Cargo target dir is the repo root (root Cargo.toml is a workspace),
+          # not src-tauri/. Print what we produced so a mismatch is obvious.
+          find target -path '*bundle/nsis/*.exe' -printf '%s  %p\n' 2>/dev/null || \
+            find target -path '*bundle/nsis/*.exe' -exec ls -lh {} \;
+          test -n "$(find target -path '*bundle/nsis/*.exe' -print -quit)" || {
+            echo "::error::no NSIS installer under target/"
+            find target -maxdepth 4 -type d -name bundle || true
+            exit 1
+          }
+
       - name: Upload installer for manual testing
         uses: actions/upload-artifact@v4
         with:
           name: haiobypass-${{ matrix.variant }}-installer
-          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          path: target/**/bundle/nsis/*.exe
           if-no-files-found: error
 
   build-linux:
