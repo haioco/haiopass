@@ -20,10 +20,12 @@ mod imp {
     const EVERGREEN_X64: &str = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
     /// WebView2 "Evergreen" runtime EdgeUpdate client GUID.
     const CLIENT_GUID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+    /// The executable the WebView2 loader actually needs on disk.
+    const RUNTIME_EXE: &str = "msedgewebview2.exe";
     const RETRY_COOLDOWN: Duration = Duration::from_secs(24 * 60 * 60);
 
-    /// Installed runtime version, looked up in HKLM (32/64 views) then HKCU.
-    fn runtime_version() -> Option<String> {
+    /// Full EdgeUpdate registration for the runtime: (version, install location).
+    fn runtime_registration() -> Option<(String, String)> {
         let paths = [
             (
                 HKEY_LOCAL_MACHINE,
@@ -50,32 +52,61 @@ mod imp {
 
         for (root, path) in paths {
             let root = RegKey::predef(root);
-            if let Ok(key) = root.open_subkey_with_flags(&path, KEY_READ) {
-                if let Ok(pv) = key.get_value::<String, _>("pv") {
-                    if !pv.trim().is_empty() {
-                        return Some(pv);
-                    }
-                }
+            let Ok(key) = root.open_subkey_with_flags(&path, KEY_READ) else {
+                continue;
+            };
+            let pv = key
+                .get_value::<String, _>("pv")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let location = key
+                .get_value::<String, _>("location")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            if let (Some(pv), Some(location)) = (pv, location) {
+                return Some((pv, location));
             }
         }
         None
     }
 
-    /// A fixed runtime shipped next to the exe (win7 build) has no registry
-    /// entry, so treat its presence as "available" and never trigger a repair.
-    fn bundled_runtime_present() -> bool {
-        let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf))
-        else {
+    /// A registered runtime only counts if `msedgewebview2.exe` is really on disk.
+    ///
+    /// Trusting the registry `pv` value alone is what made this pre-flight
+    /// useless: on a machine whose registration was stale or whose bundled
+    /// fixed runtime was missing, it logged "runtime detected" and returned —
+    /// and the very next step failed inside the WebView2 loader, which shows its
+    /// own English "Could not find the WebView2 Runtime" dialog with no way out.
+    fn runtime_is_usable() -> bool {
+        let Some((pv, location)) = runtime_registration() else {
             return false;
         };
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            return false;
-        };
-        entries.flatten().any(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with("WebView2FixedRuntime")
-        })
+        let base = Path::new(&location);
+        if base.join(&pv).join(RUNTIME_EXE).is_file() {
+            return true;
+        }
+        // Some registrations omit the exact version subdir; accept any version
+        // directory that actually carries the runtime executable.
+        std::fs::read_dir(base)
+            .map(|entries| entries.flatten().any(|e| e.path().join(RUNTIME_EXE).is_file()))
+            .unwrap_or(false)
+    }
+
+    /// A fixed runtime shipped next to the exe (win10/win7 builds) has no
+    /// registry entry of its own, so validate the folder itself: presence alone
+    /// is not enough — an incomplete payload fails exactly like a missing one.
+    fn bundled_runtime() -> Option<PathBuf> {
+        let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+        let entries = std::fs::read_dir(&dir).ok()?;
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("WebView2FixedRuntime") && entry.path().join(RUNTIME_EXE).is_file() {
+                return Some(entry.path());
+            }
+        }
+        None
     }
 
     /// Avoid re-running a ~150 MB download on every launch when it keeps failing.
@@ -154,7 +185,7 @@ mod imp {
         Ok(())
     }
 
-    /// Run the installer for the current user and wait for registration.
+    /// Run the installer for the current user and wait for a *usable* runtime.
     fn run_installer() -> Result<(), String> {
         let exe = installer_path();
         let status = std::process::Command::new(&exe)
@@ -162,9 +193,12 @@ mod imp {
             .status()
             .map_err(|e| format!("could not launch installer: {}", e))?;
 
+        // Wait for the runtime executable to actually appear, not merely for the
+        // registration to be written — a registered version with no binaries is
+        // the exact state the loader refuses to start from.
         let deadline = Instant::now() + Duration::from_secs(120);
         while Instant::now() < deadline {
-            if runtime_version().is_some() {
+            if runtime_is_usable() {
                 return Ok(());
             }
             std::thread::sleep(Duration::from_secs(2));
@@ -208,44 +242,60 @@ mod imp {
             .status();
     }
 
+    /// Shown when no usable WebView2 runtime could be found or repaired. Kept in
+    /// one place so both the pre-flight and the window-creation failure path
+    /// give the user the same actionable Persian guidance instead of the
+    /// WebView2 loader's opaque English message box.
+    fn show_runtime_error_dialog() {
+        native_dialog(
+            "HaioBypass — WebView2",
+            "این برنامه برای اجرا به WebView2 Runtime نیاز دارد و نصب خودکار آن ناموفق بود.\n\n\
+             لطفاً با دسترسی Administrator این فایل را نصب کنید:\n\
+             https://go.microsoft.com/fwlink/p/?LinkId=2124703\n\n\
+             سپس برنامه را دوباره اجرا کنید.\n\n\
+             This app requires the WebView2 Runtime. The automatic installation failed.\n\
+             Please install it manually as Administrator using the link above, then\n\
+             start the app again.",
+        );
+    }
+
     pub fn preflight() {
-        if let Some(v) = runtime_version() {
-            tracing::info!("WebView2 runtime {} detected", v);
-            return;
-        }
-        if bundled_runtime_present() {
-            tracing::info!("Bundled WebView2 fixed runtime detected");
+        if let Some(dir) = bundled_runtime() {
+            tracing::info!("Bundled WebView2 fixed runtime verified: {}", dir.display());
             return;
         }
 
-        tracing::warn!("WebView2 runtime not found — attempting silent repair");
+        if runtime_is_usable() {
+            match runtime_registration() {
+                Some((pv, _)) => tracing::info!("WebView2 runtime {} verified on disk", pv),
+                None => tracing::info!("WebView2 runtime verified on disk"),
+            }
+            return;
+        }
+
+        tracing::warn!("WebView2 runtime missing or unusable — attempting silent repair");
 
         if repair_cooling_down() {
             tracing::warn!("WebView2 repair skipped (recent failure)");
-            return;
-        }
-
-        if let Err(e) = download_installer().and_then(|_| run_installer()) {
+        } else if let Err(e) = download_installer().and_then(|_| run_installer()) {
             tracing::error!("WebView2 repair failed: {}", e);
             mark_repair_failed();
-            return;
-        }
-
-        if runtime_version().is_some() {
+        } else if runtime_is_usable() {
             tracing::info!("WebView2 runtime installed successfully");
             clear_repair_marker();
+            return;
         } else {
-            tracing::error!("WebView2 still missing after repair attempt");
+            tracing::error!("WebView2 still unusable after repair attempt");
             mark_repair_failed();
-            native_dialog(
-                "HaioBypass — WebView2",
-                "این برنامه برای اجرا به WebView2 Runtime نیاز دارد و نصب خودکار آن ناموفق بود.\n\n\
-                 لطفاً با دسترسی Administrator این فایل را نصب کنید:\n\
-                 https://go.microsoft.com/fwlink/p/?LinkId=2124703\n\n\
-                 This app requires the WebView2 Runtime. The automatic installation failed.\n\
-                 Please install it manually as Administrator using the link above.",
-            );
         }
+
+        // Always explain, even when the repair was skipped: staying silent here
+        // is what left users staring at the loader's English error box.
+        show_runtime_error_dialog();
+    }
+
+    pub fn show_native_dialog(title: &str, body: &str) {
+        native_dialog(title, body)
     }
 }
 
@@ -255,10 +305,26 @@ mod imp {
     pub fn preflight() {
         tracing::info!("WebView pre-flight skipped (non-Windows)");
     }
+
+    pub fn show_native_dialog(title: &str, body: &str) {
+        tracing::error!("{}: {}", title, body);
+    }
 }
 
 /// Detect a missing WebView2 runtime and try to repair it before any window is
 /// created. Safe to call on every platform and on every launch.
+///
+/// This verifies that a runtime is actually usable — a registered version
+/// number is not enough. Anything less reports success and then lets the
+/// WebView2 loader fail with an untranslatable English error box.
 pub fn preflight() {
     imp::preflight()
+}
+
+/// Show a native, webview-free message box.
+///
+/// Used when the window could not be created at all, i.e. exactly when the
+/// webview cannot be trusted to render any UI.
+pub fn show_native_dialog(title: &str, body: &str) {
+    imp::show_native_dialog(title, body)
 }

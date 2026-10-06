@@ -17,7 +17,28 @@ NUPKG_URL="https://api.nuget.org/v3-flatcontainer/webview2.runtime.x64/${WV2_VER
 INNER_PREFIX="contentFiles/any/any/WebView2"
 FIXED_RUNTIME_DIR="$DEST_DIR/WebView2FixedRuntime109"
 
-if [ -f "$FIXED_RUNTIME_DIR/msedgewebview2.exe" ] && [ -d "$FIXED_RUNTIME_DIR/EBWebView" ]; then
+validate_runtime() { # validate_runtime <dir> — version-agnostic payload check
+  local d="$1" n
+  # Deliberately does NOT check EBWebView: 109 predates it, so the original
+  # check here failed on every single run. These three files ship in every
+  # fixed-runtime package, including 109, so they are the safe assertion.
+  for f in msedgewebview2.exe resources.pak icudtl.dat; do
+    if [ ! -f "$d/$f" ]; then
+      echo "  missing runtime payload file: $f"
+      return 1
+    fi
+  done
+  # A truncated or error-page download still extracts "something"; a real
+  # fixed runtime is 50+ files.
+  n=$(find "$d" -type f 2>/dev/null | wc -l | tr -d ' ')
+  if [ "${n:-0}" -lt 30 ]; then
+    echo "  only $n files extracted — payload looks truncated"
+    return 1
+  fi
+  return 0
+}
+
+if validate_runtime "$FIXED_RUNTIME_DIR"; then
   echo "✓ Fixed runtime already staged at $FIXED_RUNTIME_DIR"
   exit 0
 fi
@@ -47,6 +68,13 @@ PYEOF
   ;;
 esac
 echo "✓ Downloaded $(du -h "$NUPKG_TMP" | cut -f1)"
+# Guard against a truncated / error-page "successful" download.
+NUPKG_BYTES=$(wc -c < "$NUPKG_TMP" | tr -d ' ')
+if [ "${NUPKG_BYTES:-0}" -lt 20000000 ]; then
+  echo "✗ WebView2 nupkg is only ${NUPKG_BYTES} bytes — download truncated or blocked"
+  rm -f "$NUPKG_TMP"
+  exit 1
+fi
 
 echo "Extracting fixed runtime ($INNER_PREFIX/*)..."
 rm -rf "$FIXED_RUNTIME_DIR"
@@ -70,8 +98,8 @@ PYEOF
 fi
 rm -f "$NUPKG_TMP"
 
-if [ ! -f "$FIXED_RUNTIME_DIR/msedgewebview2.exe" ] || [ ! -d "$FIXED_RUNTIME_DIR/EBWebView" ]; then
-  echo "✗ Extracted runtime is incomplete (missing msedgewebview2.exe or EBWebView/)"
+if ! validate_runtime "$FIXED_RUNTIME_DIR"; then
+  echo "✗ Extracted WebView2 ${WV2_VERSION} runtime is incomplete — refusing to ship it"
   exit 1
 fi
 

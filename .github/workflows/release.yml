@@ -44,13 +44,25 @@ jobs:
         run: |
           bash scripts/fetch-webview2-fixed.sh || echo "⚠ WebView2 fixed runtime download failed"
           ls -lh resources/webview2/ || true
-          # fixedRuntime mode requires the staged runtime dir to exist;
-          # fail early with a clear message instead of a cryptic bundle error.
-          if [ ! -d resources/webview2/WebView2FixedRuntime ] || [ -z "$(ls -A resources/webview2/WebView2FixedRuntime 2>/dev/null)" ]; then
-            echo "✗ WebView2 fixed runtime missing at resources/webview2/WebView2FixedRuntime — win10 build cannot proceed"
+          # fixedRuntime mode requires a COMPLETE staged runtime dir. Checking
+          # only that the dir is non-empty once let a rejected runtime ship and
+          # break every Windows 10 launch. Verify the payload files the WebView2
+          # loader actually needs.
+          DIR=resources/webview2/WebView2FixedRuntime
+          MISSING=""
+          # msedge.dll exists only in 109; EBWebView/ only in 128+. These three
+          # are present in every fixed-runtime package.
+          for f in msedgewebview2.exe resources.pak icudtl.dat; do
+            [ -f "$DIR/$f" ] || MISSING="$MISSING $f"
+          done
+          COUNT=$(find "$DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
+          [ "${COUNT:-0}" -ge 30 ] || MISSING="$MISSING (only $COUNT files)"
+          if [ ! -d "$DIR" ] || [ -n "$MISSING" ]; then
+            echo "✗ WebView2 fixed runtime incomplete at $DIR — missing:$MISSING"
+            echo "✗ win10 build cannot proceed (app would fail with 'Could not find the WebView2 Runtime')"
             exit 1
           fi
-          echo "✓ WebView2 fixed runtime staged"
+          echo "✓ WebView2 fixed runtime staged and verified"
 
       - name: Prepare Windows 7 offline WebView2 109 (win7 variant)
         if: matrix.variant == 'win7'
@@ -63,13 +75,23 @@ jobs:
             bash scripts/build-trojan-win7.sh || echo "⚠ Win7 trojan rebuild failed, using existing binary"
           fi
           ls -lh resources/trojan-go/
-          # fixedRuntime mode requires the staged runtime dir to exist;
-          # fail early with a clear message instead of a cryptic bundle error.
-          if [ ! -d resources/webview2/WebView2FixedRuntime109 ] || [ -z "$(ls -A resources/webview2/WebView2FixedRuntime109 2>/dev/null)" ]; then
-            echo "✗ WebView2 fixed runtime missing at resources/webview2/WebView2FixedRuntime109 — win7 build cannot proceed"
+          # Same completeness gate as the win10 variant: a non-empty dir is not
+          # a usable fixed runtime.
+          DIR=resources/webview2/WebView2FixedRuntime109
+          MISSING=""
+          # msedge.dll exists only in 109; EBWebView/ only in 128+. These three
+          # are present in every fixed-runtime package.
+          for f in msedgewebview2.exe resources.pak icudtl.dat; do
+            [ -f "$DIR/$f" ] || MISSING="$MISSING $f"
+          done
+          COUNT=$(find "$DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
+          [ "${COUNT:-0}" -ge 30 ] || MISSING="$MISSING (only $COUNT files)"
+          if [ ! -d "$DIR" ] || [ -n "$MISSING" ]; then
+            echo "✗ WebView2 109 fixed runtime incomplete at $DIR — missing:$MISSING"
+            echo "✗ win7 build cannot proceed (app would fail with 'Could not find the WebView2 Runtime')"
             exit 1
           fi
-          echo "✓ WebView2 fixed runtime staged"
+          echo "✓ WebView2 109 fixed runtime staged and verified"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -185,6 +207,39 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: bash scripts/generate-updater-json.sh
+
+      - name: Verify win10 and win7 assets did not collide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The win10 and win7 variants must produce DIFFERENT installer names.
+          # They once shared productName+version, so both matrix jobs uploaded the
+          # identical asset name and one silently overwrote the other — Windows 10
+          # users received the Win7 binary, which hard-requires a WebView2 109
+          # fixed runtime and failed at every launch.
+          ASSETS=$(gh release view "${{ github.ref_name }}" --repo haioco/haiopass --json assets --jq '.assets[].name')
+          echo "assets:"; echo "$ASSETS"
+
+          WIN10=$(echo "$ASSETS" | grep -E '^HaioBypass_[0-9][^_]*_x64-setup\.exe$' || true)
+          WIN7=$(echo "$ASSETS" | grep -E '^HaioBypassWin7_[0-9][^_]*_x64-setup\.exe$' || true)
+
+          if [ -z "$WIN10" ]; then
+            echo "✗ win10 installer (HaioBypass_<ver>_x64-setup.exe) not found"
+            exit 1
+          fi
+          if [ -z "$WIN7" ]; then
+            echo "✗ win7 installer (HaioBypassWin7_<ver>_x64-setup.exe) not found —"
+            echo "  the win7 matrix job produced no distinct artifact"
+            exit 1
+          fi
+
+          DUPES=$(echo "$ASSETS" | sort | uniq -d)
+          if [ -n "$DUPES" ]; then
+            echo "✗ duplicate asset names in release: $DUPES"
+            exit 1
+          fi
+          echo "✓ win10 and win7 assets are distinct: '$WIN10' / '$WIN7'"
 
       - name: Update release to published
         run: |
