@@ -1,0 +1,104 @@
+name: CI
+
+# Build-only verification. Publishes nothing: no release, no tag, no signed
+# assets. Exists so Rust changes are actually compiled before anyone cuts a tag.
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: windows-${{ matrix.variant }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: win10
+            config: src-tauri/tauri.conf.json
+          - variant: win7
+            config: src-tauri/tauri.win7.conf.json
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download bundled haio-proxy binaries
+        shell: bash
+        run: bash scripts/fetch-trojan.sh
+
+      - name: Prepare fixed WebView2 runtime
+        shell: bash
+        run: |
+          if [ "${{ matrix.variant }}" = "win7" ]; then
+            bash scripts/fetch-webview2-109.sh || echo "warn: WebView2 109 fetch failed"
+            DIR=resources/webview2/WebView2FixedRuntime109
+          else
+            bash scripts/fetch-webview2-fixed.sh || echo "warn: WebView2 fixed fetch failed"
+            DIR=resources/webview2/WebView2FixedRuntime
+          fi
+          # Same completeness gate as the release workflow.
+          MISSING=""
+          for f in msedgewebview2.exe msedge.dll resources.pak; do
+            [ -f "$DIR/$f" ] || MISSING="$MISSING $f"
+          done
+          if [ ! -d "$DIR" ] || [ -n "$MISSING" ]; then
+            echo "::error::WebView2 fixed runtime incomplete at $DIR — missing:$MISSING"
+            exit 1
+          fi
+          echo "WebView2 fixed runtime verified at $DIR"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build installer (compile check)
+        run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis --config ${{ matrix.config }}
+
+      - name: Upload installer for manual testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: haiobypass-${{ matrix.variant }}-installer
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  build-linux:
+    name: linux
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download bundled haio-proxy binaries
+        shell: bash
+        run: bash scripts/fetch-trojan.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run tauri build -- --bundles deb

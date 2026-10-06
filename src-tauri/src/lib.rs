@@ -90,7 +90,7 @@ pub fn run() {
     let app_state = state.clone();
     let window_state = state.clone();
 
-    tauri::Builder::default()
+    let started = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state)
@@ -165,6 +165,23 @@ pub fn run() {
                 });
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::generate_context!());
+
+    // When window creation fails — the usual cause on Windows being a WebView2
+    // runtime the loader cannot use — `.expect()` aborted into an opaque state:
+    // the process lingered behind the loader's own English message box with no
+    // window and no way forward, which users reported as "the app won't run".
+    // Explain it in Persian and exit cleanly instead of hanging.
+    if let Err(e) = started {
+        tracing::error!("HaioBypass could not create its window: {}", e);
+        webview_check::show_native_dialog(
+            "HaioBypass — WebView2",
+            "برنامه نتوانست پنجره را نمایش دهد. لطفاً WebView2 Runtime را نصب کنید:\n\n\
+             https://go.microsoft.com/fwlink/p/?LinkId=2124703\n\n\
+             سپس برنامه را دوباره اجرا کنید.\n\n\
+             HaioBypass could not create its window. Please install the WebView2\n\
+             Runtime from the link above and start the app again.",
+        );
+        std::process::exit(1);
+    }
 }

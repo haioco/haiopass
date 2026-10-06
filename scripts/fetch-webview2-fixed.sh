@@ -17,7 +17,21 @@ INDEX_URL="https://api.nuget.org/v3-flatcontainer/webview2.runtime.x64/index.jso
 INNER_PREFIX="contentFiles/any/any/WebView2"
 FIXED_RUNTIME_DIR="$DEST_DIR/WebView2FixedRuntime"
 
-if [ -f "$FIXED_RUNTIME_DIR/msedgewebview2.exe" ] && [ -d "$FIXED_RUNTIME_DIR/EBWebView" ]; then
+validate_runtime() { # validate_runtime <dir> — checks real payload files, not EBWebView
+  local d="$1"
+  # EBWebView is the WebView2 *user-data* folder name, not part of the runtime
+  # payload — checking for it made this validation fail on every run. Verify the
+  # files the loader actually needs instead.
+  for f in msedgewebview2.exe msedge.dll resources.pak; do
+    if [ ! -f "$d/$f" ]; then
+      echo "✗ Missing runtime payload file: $f"
+      return 1
+    fi
+  done
+  return 0
+}
+
+if [ -f "$FIXED_RUNTIME_DIR/msedgewebview2.exe" ] && validate_runtime "$FIXED_RUNTIME_DIR"; then
   echo "✓ Fixed runtime already staged at $FIXED_RUNTIME_DIR"
   exit 0
 fi
@@ -92,8 +106,8 @@ PYEOF
 fi
 rm -f "$NUPKG_TMP"
 
-if [ ! -f "$FIXED_RUNTIME_DIR/msedgewebview2.exe" ] || [ ! -d "$FIXED_RUNTIME_DIR/EBWebView" ]; then
-  echo "✗ Extracted runtime is incomplete (missing msedgewebview2.exe or EBWebView/)"
+if ! validate_runtime "$FIXED_RUNTIME_DIR"; then
+  echo "✗ Extracted WebView2 ${WV2_VERSION} runtime is incomplete — refusing to ship it"
   exit 1
 fi
 
