@@ -50,9 +50,13 @@ jobs:
           # loader actually needs.
           DIR=resources/webview2/WebView2FixedRuntime
           MISSING=""
-          for f in msedgewebview2.exe msedge.dll resources.pak; do
+          # msedge.dll exists only in 109; EBWebView/ only in 128+. These three
+          # are present in every fixed-runtime package.
+          for f in msedgewebview2.exe resources.pak icudtl.dat; do
             [ -f "$DIR/$f" ] || MISSING="$MISSING $f"
           done
+          COUNT=$(find "$DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
+          [ "${COUNT:-0}" -ge 30 ] || MISSING="$MISSING (only $COUNT files)"
           if [ ! -d "$DIR" ] || [ -n "$MISSING" ]; then
             echo "✗ WebView2 fixed runtime incomplete at $DIR — missing:$MISSING"
             echo "✗ win10 build cannot proceed (app would fail with 'Could not find the WebView2 Runtime')"
@@ -75,9 +79,13 @@ jobs:
           # a usable fixed runtime.
           DIR=resources/webview2/WebView2FixedRuntime109
           MISSING=""
-          for f in msedgewebview2.exe msedge.dll resources.pak; do
+          # msedge.dll exists only in 109; EBWebView/ only in 128+. These three
+          # are present in every fixed-runtime package.
+          for f in msedgewebview2.exe resources.pak icudtl.dat; do
             [ -f "$DIR/$f" ] || MISSING="$MISSING $f"
           done
+          COUNT=$(find "$DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
+          [ "${COUNT:-0}" -ge 30 ] || MISSING="$MISSING (only $COUNT files)"
           if [ ! -d "$DIR" ] || [ -n "$MISSING" ]; then
             echo "✗ WebView2 109 fixed runtime incomplete at $DIR — missing:$MISSING"
             echo "✗ win7 build cannot proceed (app would fail with 'Could not find the WebView2 Runtime')"

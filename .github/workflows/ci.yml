@@ -43,9 +43,13 @@ jobs:
           fi
           # Same completeness gate as the release workflow.
           MISSING=""
-          for f in msedgewebview2.exe msedge.dll resources.pak; do
+          # msedge.dll exists only in 109; EBWebView/ only in 128+. These three
+          # are present in every fixed-runtime package.
+          for f in msedgewebview2.exe resources.pak icudtl.dat; do
             [ -f "$DIR/$f" ] || MISSING="$MISSING $f"
           done
+          COUNT=$(find "$DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
+          [ "${COUNT:-0}" -ge 30 ] || MISSING="$MISSING (only $COUNT files)"
           if [ ! -d "$DIR" ] || [ -n "$MISSING" ]; then
             echo "::error::WebView2 fixed runtime incomplete at $DIR — missing:$MISSING"
             exit 1

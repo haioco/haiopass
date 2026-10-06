@@ -17,21 +17,29 @@ INDEX_URL="https://api.nuget.org/v3-flatcontainer/webview2.runtime.x64/index.jso
 INNER_PREFIX="contentFiles/any/any/WebView2"
 FIXED_RUNTIME_DIR="$DEST_DIR/WebView2FixedRuntime"
 
-validate_runtime() { # validate_runtime <dir> — checks real payload files, not EBWebView
-  local d="$1"
-  # EBWebView is the WebView2 *user-data* folder name, not part of the runtime
-  # payload — checking for it made this validation fail on every run. Verify the
-  # files the loader actually needs instead.
-  for f in msedgewebview2.exe msedge.dll resources.pak; do
+validate_runtime() { # validate_runtime <dir> — version-agnostic payload check
+  local d="$1" n
+  # Deliberately does NOT check msedge.dll or EBWebView: those differ by major.
+  # 109 ships msedge.dll and has no EBWebView/; 128+ ships msedge_elf.dll and
+  # does have EBWebView/. These three files are present in every fixed-runtime
+  # package, so they are the only safe thing to assert on.
+  for f in msedgewebview2.exe resources.pak icudtl.dat; do
     if [ ! -f "$d/$f" ]; then
-      echo "✗ Missing runtime payload file: $f"
+      echo "  missing runtime payload file: $f"
       return 1
     fi
   done
+  # A truncated or error-page download still extracts "something"; a real
+  # fixed runtime is 50+ files.
+  n=$(find "$d" -type f 2>/dev/null | wc -l | tr -d ' ')
+  if [ "${n:-0}" -lt 30 ]; then
+    echo "  only $n files extracted — payload looks truncated"
+    return 1
+  fi
   return 0
 }
 
-if [ -f "$FIXED_RUNTIME_DIR/msedgewebview2.exe" ] && validate_runtime "$FIXED_RUNTIME_DIR"; then
+if validate_runtime "$FIXED_RUNTIME_DIR"; then
   echo "✓ Fixed runtime already staged at $FIXED_RUNTIME_DIR"
   exit 0
 fi
@@ -82,6 +90,14 @@ echo "✓ Latest WebView2 runtime in feed: ${WV2_VERSION}"
 NUPKG_URL="https://api.nuget.org/v3-flatcontainer/webview2.runtime.x64/${WV2_VERSION}/webview2.runtime.x64.${WV2_VERSION}.nupkg"
 NUPKG_TMP="$DEST_DIR/.webview2-${WV2_VERSION}.nupkg"
 fetch "$NUPKG_URL" "$NUPKG_TMP"
+# A proxy/CDN error page can arrive as a tiny "successful" response; without
+# this guard the extraction below happily produced a broken runtime.
+NUPKG_BYTES=$(wc -c < "$NUPKG_TMP" | tr -d ' ')
+if [ "${NUPKG_BYTES:-0}" -lt 20000000 ]; then
+  echo "✗ WebView2 nupkg is only ${NUPKG_BYTES} bytes — download truncated or blocked"
+  rm -f "$NUPKG_TMP"
+  exit 1
+fi
 echo "✓ Downloaded $(du -h "$NUPKG_TMP" | cut -f1)"
 
 echo "Extracting fixed runtime ($INNER_PREFIX/*)..."
