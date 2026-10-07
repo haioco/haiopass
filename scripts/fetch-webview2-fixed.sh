@@ -16,22 +16,33 @@
 # extracts to `$INSTDIR\WebView2FixedRuntime` — next to the exe, where the
 # app's preflight (src-tauri/src/webview_check.rs) wires it up via
 # WEBVIEW2_BROWSER_EXECUTABLE_FOLDER.
+#
+# Since 152.0.4191.53 the runtime no longer fits NuGet's 250 MB package
+# limit, so the feed splits it in TWO packages:
+#   WebView2.Runtime.X64       — loader shell (msedgewebview2.exe, paks, ...)
+#   WebView2.Runtime.X64.Core — the browser core (msedge.dll, ~150 MB)
+# Both are downloaded and merged into one staging dir. A staging without
+# the Core half LOOKS fine and passes file-count checks, but msedgewebview2
+# can never boot without msedge.dll — the loader finds it, launches it, it
+# dies, and the app hangs in WebView2 environment creation. That exact
+# half-package is what shipped broken before this was caught; the
+# msedge.dll assertion below now refuses it.
 set -euo pipefail
 
 DEST_DIR="$(cd "$(dirname "$0")/../src-tauri" && pwd 2>/dev/null || echo "$(pwd)/src-tauri")"
 mkdir -p "$DEST_DIR"
 
-INDEX_URL="https://api.nuget.org/v3-flatcontainer/webview2.runtime.x64/index.json"
-INNER_PREFIX="contentFiles/any/any/WebView2"
+BASE_INDEX_URL="https://api.nuget.org/v3-flatcontainer/webview2.runtime.x64/index.json"
+CORE_INDEX_URL="https://api.nuget.org/v3-flatcontainer/webview2.runtime.x64.core/index.json"
 FIXED_RUNTIME_DIR="$DEST_DIR/WebView2FixedRuntime"
 
-validate_runtime() { # validate_runtime <dir> — version-agnostic payload check
+validate_runtime() { # validate_runtime <dir> — payload completeness check
   local d="$1" n
-  # Deliberately does NOT check msedge.dll or EBWebView: those differ by major.
-  # 109 ships msedge.dll and has no EBWebView/; 128+ ships msedge_elf.dll and
-  # does have EBWebView/. These three files are present in every fixed-runtime
-  # package, so they are the only safe thing to assert on.
-  for f in msedgewebview2.exe resources.pak icudtl.dat; do
+  # Deliberately does NOT check EBWebView/: 109 predates it, 128+ ships it.
+  # msedge.dll ships in every COMPLETE runtime (native in 109, via the
+  # .Core package in 152+) — its absence means an incomplete payload,
+  # which is precisely the "looks staged, never boots" failure.
+  for f in msedgewebview2.exe msedge.dll resources.pak icudtl.dat; do
     if [ ! -f "$d/$f" ]; then
       echo "  missing runtime payload file: $f"
       return 1
@@ -52,15 +63,20 @@ if validate_runtime "$FIXED_RUNTIME_DIR"; then
   exit 0
 fi
 
-# Pick a downloader: curl > wget > python3
+# Pick a downloader: curl > wget > python
 DOWNLOADER=""
 if command -v curl >/dev/null 2>&1; then DOWNLOADER="curl"
 elif command -v wget >/dev/null 2>&1; then DOWNLOADER="wget"
-elif command -v python3 >/dev/null 2>&1; then DOWNLOADER="python3"
-else echo "✗ No downloader available (curl/wget/python3)"; exit 1
+else DOWNLOADER="python"
+fi
+# Python is also the extractor (nupkg = zip; the payload root can differ
+# between the base and .Core packages, so unzip with a fixed prefix is not
+# safe). Prefer python3, fall back to python (Windows runners).
+if command -v python3 >/dev/null 2>&1; then PY=python3
+else PY=python
 fi
 
-echo "Using downloader: $DOWNLOADER"
+echo "Using downloader: $DOWNLOADER; extractor: $PY"
 
 # Robust download with retries; curl/wget resume partial files between attempts.
 fetch() { # fetch <url> <dest>
@@ -69,7 +85,7 @@ fetch() { # fetch <url> <dest>
     case "$DOWNLOADER" in
       curl) curl -fsSL --retry 3 --retry-delay 2 -C - -o "$dest" "$url" && return 0 ;;
       wget) wget -q --tries=3 -O "$dest" "$url" && return 0 ;;
-      python3) python3 - "$url" "$dest" <<'PYEOF' && return 0
+      python) "$PY" - "$url" "$dest" <<'PYEOF' && return 0
 import sys, urllib.request
 url, out = sys.argv[1], sys.argv[2]
 try:
@@ -87,7 +103,7 @@ PYEOF
 }
 
 INDEX_TMP="$DEST_DIR/.webview2-index.json"
-fetch "$INDEX_URL" "$INDEX_TMP"
+fetch "$BASE_INDEX_URL" "$INDEX_TMP"
 
 # Versions array is ascending — the last entry is the newest release.
 WV2_VERSION="$(grep -oE '[0-9]+(\.[0-9]+)+' "$INDEX_TMP" | tail -1)"
@@ -95,43 +111,64 @@ rm -f "$INDEX_TMP"
 [ -n "$WV2_VERSION" ] || { echo "✗ Could not parse latest WebView2 runtime version from feed"; exit 1; }
 echo "✓ Latest WebView2 runtime in feed: ${WV2_VERSION}"
 
-NUPKG_URL="https://api.nuget.org/v3-flatcontainer/webview2.runtime.x64/${WV2_VERSION}/webview2.runtime.x64.${WV2_VERSION}.nupkg"
-NUPKG_TMP="$DEST_DIR/.webview2-${WV2_VERSION}.nupkg"
-fetch "$NUPKG_URL" "$NUPKG_TMP"
+BASE_URL="https://api.nuget.org/v3-flatcontainer/webview2.runtime.x64/${WV2_VERSION}/webview2.runtime.x64.${WV2_VERSION}.nupkg"
+CORE_URL="https://api.nuget.org/v3-flatcontainer/webview2.runtime.x64.core/${WV2_VERSION}/webview2.runtime.x64.core.${WV2_VERSION}.nupkg"
+
+BASE_TMP="$DEST_DIR/.webview2-${WV2_VERSION}.nupkg"
+CORE_TMP="$DEST_DIR/.webview2-core-${WV2_VERSION}.nupkg"
+fetch "$BASE_URL" "$BASE_TMP"
+fetch "$CORE_URL" "$CORE_TMP"
+
 # A proxy/CDN error page can arrive as a tiny "successful" response; without
 # this guard the extraction below happily produced a broken runtime.
-NUPKG_BYTES=$(wc -c < "$NUPKG_TMP" | tr -d ' ')
-if [ "${NUPKG_BYTES:-0}" -lt 20000000 ]; then
-  echo "✗ WebView2 nupkg is only ${NUPKG_BYTES} bytes — download truncated or blocked"
-  rm -f "$NUPKG_TMP"
-  exit 1
-fi
-echo "✓ Downloaded $(du -h "$NUPKG_TMP" | cut -f1)"
+for f in "$BASE_TMP" "$CORE_TMP"; do
+  BYTES=$(wc -c < "$f" | tr -d ' ')
+  if [ "${BYTES:-0}" -lt 20000000 ]; then
+    echo "✗ nupkg $f is only ${BYTES} bytes — download truncated or blocked"
+    rm -f "$BASE_TMP" "$CORE_TMP"
+    exit 1
+  fi
+done
+echo "✓ Downloaded base $(du -h "$BASE_TMP" | cut -f1) + core $(du -h "$CORE_TMP" | cut -f1)"
 
-echo "Extracting fixed runtime ($INNER_PREFIX/*)..."
+echo "Extracting and merging WebView2 payload (base + core)..."
 rm -rf "$FIXED_RUNTIME_DIR"
 mkdir -p "$FIXED_RUNTIME_DIR"
-if command -v unzip >/dev/null 2>&1; then
-  unzip -q "$NUPKG_TMP" "$INNER_PREFIX/*" -d /tmp/wv2_extract
-  cp -r /tmp/wv2_extract/"$INNER_PREFIX"/* "$FIXED_RUNTIME_DIR/"
-  rm -rf /tmp/wv2_extract
-else
-  python3 - "$NUPKG_TMP" "$INNER_PREFIX" "$FIXED_RUNTIME_DIR" <<'PYEOF'
+for pkg in "$BASE_TMP" "$CORE_TMP"; do
+  "$PY" - "$pkg" "$FIXED_RUNTIME_DIR" <<'PYEOF'
 import sys, zipfile, os, shutil
-pkg, prefix, dest = sys.argv[1], sys.argv[2].rstrip("/") + "/", sys.argv[3]
+pkg, dest = sys.argv[1], sys.argv[2]
 with zipfile.ZipFile(pkg) as z:
-    for n in z.namelist():
-        if n.startswith(prefix) and not n.endswith("/"):
-            out = os.path.join(dest, n[len(prefix):])
+    names = [n for n in z.namelist() if not n.endswith('/')]
+    # Locate the WebView2 payload root inside the nupkg. The base package
+    # uses contentFiles/any/any/WebView2; the .Core package may nest it
+    # differently (e.g. .../WebView2.Core) — find the single directory
+    # segment starting with `WebView2` and map everything under it to the
+    # staging root so both packages merge.
+    roots = set()
+    for n in names:
+        parts = n.split('/')
+        for i, p in enumerate(parts[:-1]):
+            if p == 'WebView2' or p.startswith('WebView2.'):
+                roots.add('/'.join(parts[:i + 1]))
+                break
+    if not roots:
+        raise SystemExit(f"✗ no WebView2 payload found in {pkg}")
+    if len(roots) > 1:
+        raise SystemExit(f"✗ ambiguous WebView2 payload roots in {pkg}: {roots}")
+    root = sorted(roots)[0] + '/'
+    for n in names:
+        if n.startswith(root):
+            out = os.path.join(dest, n[len(root):])
             os.makedirs(os.path.dirname(out), exist_ok=True)
-            with z.open(n) as src, open(out, "wb") as dst:
+            with z.open(n) as src, open(out, 'wb') as dst:
                 shutil.copyfileobj(src, dst)
 PYEOF
-fi
-rm -f "$NUPKG_TMP"
+done
+rm -f "$BASE_TMP" "$CORE_TMP"
 
 if ! validate_runtime "$FIXED_RUNTIME_DIR"; then
-  echo "✗ Extracted WebView2 ${WV2_VERSION} runtime is incomplete — refusing to ship it"
+  echo "✗ Merged WebView2 ${WV2_VERSION} runtime is incomplete — refusing to ship it"
   exit 1
 fi
 

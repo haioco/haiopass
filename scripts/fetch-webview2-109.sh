@@ -26,7 +26,9 @@ validate_runtime() { # validate_runtime <dir> — version-agnostic payload check
   # Deliberately does NOT check EBWebView: 109 predates it, so the original
   # check here failed on every single run. These three files ship in every
   # fixed-runtime package, including 109, so they are the safe assertion.
-  for f in msedgewebview2.exe resources.pak icudtl.dat; do
+  # msedge.dll is the browser core — 109 ships it natively (the base/.Core
+  # split only starts at 152); its absence means an incomplete payload.
+  for f in msedgewebview2.exe msedge.dll resources.pak icudtl.dat; do
     if [ ! -f "$d/$f" ]; then
       echo "  missing runtime payload file: $f"
       return 1

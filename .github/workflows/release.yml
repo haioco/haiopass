@@ -53,9 +53,11 @@ jobs:
           # a runtime that nothing could find.
           DIR=src-tauri/WebView2FixedRuntime
           MISSING=""
-          # msedge.dll exists only in 109; EBWebView/ only in 128+. These three
-          # are present in every fixed-runtime package.
-          for f in msedgewebview2.exe resources.pak icudtl.dat; do
+          # msedge.dll is the browser core: native in 109, via the separate
+          # .Core nupkg in 152+. Since 152 the runtime is split across two
+          # packages — a staging without msedge.dll is the half-package that
+          # passes file-count checks but can never boot.
+          for f in msedgewebview2.exe msedge.dll resources.pak icudtl.dat; do
             [ -f "$DIR/$f" ] || MISSING="$MISSING $f"
           done
           COUNT=$(find "$DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
@@ -82,9 +84,9 @@ jobs:
           # a usable fixed runtime.
           DIR=src-tauri/WebView2FixedRuntime109
           MISSING=""
-          # msedge.dll exists only in 109; EBWebView/ only in 128+. These three
-          # are present in every fixed-runtime package.
-          for f in msedgewebview2.exe resources.pak icudtl.dat; do
+          # msedge.dll is the browser core; 109 ships it natively (the
+          # base/.Core nupkg split only starts at 152).
+          for f in msedgewebview2.exe msedge.dll resources.pak icudtl.dat; do
             [ -f "$DIR/$f" ] || MISSING="$MISSING $f"
           done
           COUNT=$(find "$DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
