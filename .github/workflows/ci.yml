@@ -36,16 +36,16 @@ jobs:
         run: |
           if [ "${{ matrix.variant }}" = "win7" ]; then
             bash scripts/fetch-webview2-109.sh || echo "warn: WebView2 109 fetch failed"
-            DIR=resources/webview2/WebView2FixedRuntime109
+            DIR=src-tauri/WebView2FixedRuntime109
           else
             bash scripts/fetch-webview2-fixed.sh || echo "warn: WebView2 fixed fetch failed"
-            DIR=resources/webview2/WebView2FixedRuntime
+            DIR=src-tauri/WebView2FixedRuntime
           fi
-          # Same completeness gate as the release workflow.
+          # Same completeness gate as the release workflow. msedge.dll is the
+          # browser core — native in 109, merged from the separate .Core nupkg
+          # in 152+. A staging without it is the half-package that cannot boot.
           MISSING=""
-          # msedge.dll exists only in 109; EBWebView/ only in 128+. These three
-          # are present in every fixed-runtime package.
-          for f in msedgewebview2.exe resources.pak icudtl.dat; do
+          for f in msedgewebview2.exe msedge.dll resources.pak icudtl.dat; do
             [ -f "$DIR/$f" ] || MISSING="$MISSING $f"
           done
           COUNT=$(find "$DIR" -type f 2>/dev/null | wc -l | tr -d ' ')

@@ -22,6 +22,12 @@ mod imp {
     const CLIENT_GUID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
     /// The executable the WebView2 loader actually needs on disk.
     const RUNTIME_EXE: &str = "msedgewebview2.exe";
+    /// The WebView2 loader checks this env var BEFORE the registry: when set,
+    /// the folder it names is the only runtime the loader will ever use.
+    /// Tauri never sets it (wry passes `null` as the browser executable
+    /// folder), so without this line the bundled fixed runtime ships in the
+    /// installer but is never wired up.
+    const WEBVIEW2_RUNTIME_ENV: &str = "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER";
     const RETRY_COOLDOWN: Duration = Duration::from_secs(24 * 60 * 60);
 
     /// Full EdgeUpdate registration for the runtime: (version, install location).
@@ -94,19 +100,74 @@ mod imp {
             .unwrap_or(false)
     }
 
-    /// A fixed runtime shipped next to the exe (win10/win7 builds) has no
-    /// registry entry of its own, so validate the folder itself: presence alone
-    /// is not enough — an incomplete payload fails exactly like a missing one.
+    /// A fixed runtime shipped with the app has no registry entry of its own,
+    /// so validate the folder itself: presence alone is not enough — an
+    /// incomplete payload fails exactly like a missing one.
+    ///
+    /// Two layouts are known:
+    /// - since 2.0.3 the folder sits directly next to the exe
+    ///   (`$INSTDIR\WebView2FixedRuntime*`), and
+    /// - 2.0.2 and earlier extracted it under `_up_\resources\webview2\`
+    ///   because tauri-utils rewrites every `..` component of a resource
+    ///   path into `_up_`.
     fn bundled_runtime() -> Option<PathBuf> {
-        let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-        let entries = std::fs::read_dir(&dir).ok()?;
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("WebView2FixedRuntime") && entry.path().join(RUNTIME_EXE).is_file() {
-                return Some(entry.path());
+        let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+        let search_roots = [
+            exe_dir.clone(),
+            // 2.0.2-and-earlier layout (updater users run through this).
+            exe_dir.join("_up_").join("resources").join("webview2"),
+            exe_dir.join("resources").join("webview2"),
+        ];
+        for root in &search_roots {
+            let Ok(entries) = std::fs::read_dir(root) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("WebView2FixedRuntime")
+                    && entry.path().join(RUNTIME_EXE).is_file()
+                {
+                    return Some(entry.path());
+                }
             }
         }
         None
+    }
+
+    /// Point the WebView2 loader at a usable runtime.
+    ///
+    /// - With a bundled fixed runtime: set the env var so the loader uses it
+    ///   unconditionally. This is the only way the bundled runtime is ever
+    ///   found — wry passes `null` to `CreateCoreWebView2EnvironmentWithOptions`,
+    ///   so without the env var the loader ignores the bundled copy entirely
+    ///   and falls back to the registry (which is exactly the
+    ///   "Could not find the WebView2 Runtime" failure on machines that have
+    ///   no Evergreen runtime).
+    /// - Without one: an inherited (machine/user-level) env var pointing at
+    ///   a dead folder makes the loader skip the system runtime too — clear
+    ///   it so registry resolution works again.
+    fn ensure_webview_env(bundled: Option<&Path>) {
+        match bundled {
+            Some(dir) => {
+                tracing::info!(
+                    "Using bundled WebView2 fixed runtime: {}",
+                    dir.display()
+                );
+                std::env::set_var(WEBVIEW2_RUNTIME_ENV, dir);
+            }
+            None => {
+                if let Ok(value) = std::env::var(WEBVIEW2_RUNTIME_ENV) {
+                    if !Path::new(&value).join(RUNTIME_EXE).is_file() {
+                        tracing::warn!(
+                            "Clearing stale {} (points at unusable {})",
+                            WEBVIEW2_RUNTIME_ENV,
+                            value
+                        );
+                        std::env::remove_var(WEBVIEW2_RUNTIME_ENV);
+                    }
+                }
+            }
+        }
     }
 
     /// Avoid re-running a ~150 MB download on every launch when it keeps failing.
@@ -260,10 +321,13 @@ mod imp {
     }
 
     pub fn preflight() {
-        if let Some(dir) = bundled_runtime() {
+        let bundled = bundled_runtime();
+        if let Some(dir) = &bundled {
             tracing::info!("Bundled WebView2 fixed runtime verified: {}", dir.display());
+            ensure_webview_env(Some(dir));
             return;
         }
+        ensure_webview_env(None);
 
         if runtime_is_usable() {
             match runtime_registration() {

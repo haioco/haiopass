@@ -7,9 +7,13 @@
 # official Microsoft binaries, contentFiles/any/any/WebView2/*).
 # Pinned to 109.0.1518.78 — the newest 109 available in that feed
 # (all 109.x run on Win7; 109 is the last Win7-capable major).
+#
+# NOTE: staged INSIDE src-tauri on purpose (see fetch-webview2-fixed.sh) so
+# the config path `./WebView2FixedRuntime109` extracts next to the exe
+# instead of under the `_up_` path mangling that broke 2.0.2.
 set -euo pipefail
 
-DEST_DIR="$(cd "$(dirname "$0")/../resources/webview2" && pwd 2>/dev/null || echo "$(pwd)/resources/webview2")"
+DEST_DIR="$(cd "$(dirname "$0")/../src-tauri" && pwd 2>/dev/null || echo "$(pwd)/src-tauri")"
 mkdir -p "$DEST_DIR"
 
 WV2_VERSION="109.0.1518.78"
@@ -22,7 +26,9 @@ validate_runtime() { # validate_runtime <dir> — version-agnostic payload check
   # Deliberately does NOT check EBWebView: 109 predates it, so the original
   # check here failed on every single run. These three files ship in every
   # fixed-runtime package, including 109, so they are the safe assertion.
-  for f in msedgewebview2.exe resources.pak icudtl.dat; do
+  # msedge.dll is the browser core — 109 ships it natively (the base/.Core
+  # split only starts at 152); its absence means an incomplete payload.
+  for f in msedgewebview2.exe msedge.dll resources.pak icudtl.dat; do
     if [ ! -f "$d/$f" ]; then
       echo "  missing runtime payload file: $f"
       return 1
