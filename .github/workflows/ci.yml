@@ -36,10 +36,10 @@ jobs:
         run: |
           if [ "${{ matrix.variant }}" = "win7" ]; then
             bash scripts/fetch-webview2-109.sh || echo "warn: WebView2 109 fetch failed"
-            DIR=resources/webview2/WebView2FixedRuntime109
+            DIR=src-tauri/WebView2FixedRuntime109
           else
             bash scripts/fetch-webview2-fixed.sh || echo "warn: WebView2 fixed fetch failed"
-            DIR=resources/webview2/WebView2FixedRuntime
+            DIR=src-tauri/WebView2FixedRuntime
           fi
           # Same completeness gate as the release workflow.
           MISSING=""

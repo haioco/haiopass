@@ -11,6 +11,11 @@ perf.data
 __pycache__/
 # Tauri auto-generated schema snapshot (regenerated on build)
 src-tauri/gen/schemas/
-# Windows 7 offline WebView2 (large, fetched at CI)
+# Windows offline WebView2 fixed runtimes (large, fetched at CI).
+# Staged inside src-tauri so the NSIS resource path has no `..` —
+# tauri-utils mangles `..` into `_up_`, which is how 2.0.2 shipped
+# an unreachable runtime.
+src-tauri/WebView2FixedRuntime/
+src-tauri/WebView2FixedRuntime109/
 resources/webview2/
 !resources/webview2/.gitkeep

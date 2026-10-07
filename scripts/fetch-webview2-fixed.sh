@@ -8,9 +8,17 @@
 # Auto-tracks the newest version in the feed so every release ships a
 # current Chromium. The win7 build pins 109 separately
 # (scripts/fetch-webview2-109.sh) because 109 is the last Win7-capable major.
+#
+# NOTE: staged INSIDE src-tauri on purpose. Tauri resources with a `..` in
+# their path get extracted under `_up_` (tauri-utils rewrites `..` to
+# `_up_`), which is how 2.0.2 shipped a runtime nobody could find.
+# `src-tauri/WebView2FixedRuntime` + config path `./WebView2FixedRuntime`
+# extracts to `$INSTDIR\WebView2FixedRuntime` — next to the exe, where the
+# app's preflight (src-tauri/src/webview_check.rs) wires it up via
+# WEBVIEW2_BROWSER_EXECUTABLE_FOLDER.
 set -euo pipefail
 
-DEST_DIR="$(cd "$(dirname "$0")/../resources/webview2" && pwd 2>/dev/null || echo "$(pwd)/resources/webview2")"
+DEST_DIR="$(cd "$(dirname "$0")/../src-tauri" && pwd 2>/dev/null || echo "$(pwd)/src-tauri")"
 mkdir -p "$DEST_DIR"
 
 INDEX_URL="https://api.nuget.org/v3-flatcontainer/webview2.runtime.x64/index.json"

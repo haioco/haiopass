@@ -43,12 +43,15 @@ jobs:
         shell: bash
         run: |
           bash scripts/fetch-webview2-fixed.sh || echo "⚠ WebView2 fixed runtime download failed"
-          ls -lh resources/webview2/ || true
+          ls -lh src-tauri/WebView2FixedRuntime/ 2>/dev/null | head -5 || true
           # fixedRuntime mode requires a COMPLETE staged runtime dir. Checking
           # only that the dir is non-empty once let a rejected runtime ship and
           # break every Windows 10 launch. Verify the payload files the WebView2
           # loader actually needs.
-          DIR=resources/webview2/WebView2FixedRuntime
+          # Staged inside src-tauri so the resource path has no `..`:
+          # tauri-utils rewrites `..` to `_up_`, which is how 2.0.2 shipped
+          # a runtime that nothing could find.
+          DIR=src-tauri/WebView2FixedRuntime
           MISSING=""
           # msedge.dll exists only in 109; EBWebView/ only in 128+. These three
           # are present in every fixed-runtime package.
@@ -68,8 +71,8 @@ jobs:
         if: matrix.variant == 'win7'
         shell: bash
         run: |
-          bash scripts/fetch-webview2-109.sh || echo "⚠ WebView2 109 download failed — build will use placeholder, manually populate resources/webview2/"
-          ls -lh resources/webview2/ || true
+          bash scripts/fetch-webview2-109.sh || echo "⚠ WebView2 109 download failed — build will use placeholder, manually populate src-tauri/WebView2FixedRuntime109/"
+          ls -lh src-tauri/WebView2FixedRuntime109/ 2>/dev/null | head -5 || true
           # Win7 trojan-go must be Go 1.20-built; if docker available rebuild, else reuse existing
           if command -v docker >/dev/null 2>&1; then
             bash scripts/build-trojan-win7.sh || echo "⚠ Win7 trojan rebuild failed, using existing binary"
@@ -77,7 +80,7 @@ jobs:
           ls -lh resources/trojan-go/
           # Same completeness gate as the win10 variant: a non-empty dir is not
           # a usable fixed runtime.
-          DIR=resources/webview2/WebView2FixedRuntime109
+          DIR=src-tauri/WebView2FixedRuntime109
           MISSING=""
           # msedge.dll exists only in 109; EBWebView/ only in 128+. These three
           # are present in every fixed-runtime package.

@@ -7,9 +7,13 @@
 # official Microsoft binaries, contentFiles/any/any/WebView2/*).
 # Pinned to 109.0.1518.78 — the newest 109 available in that feed
 # (all 109.x run on Win7; 109 is the last Win7-capable major).
+#
+# NOTE: staged INSIDE src-tauri on purpose (see fetch-webview2-fixed.sh) so
+# the config path `./WebView2FixedRuntime109` extracts next to the exe
+# instead of under the `_up_` path mangling that broke 2.0.2.
 set -euo pipefail
 
-DEST_DIR="$(cd "$(dirname "$0")/../resources/webview2" && pwd 2>/dev/null || echo "$(pwd)/resources/webview2")"
+DEST_DIR="$(cd "$(dirname "$0")/../src-tauri" && pwd 2>/dev/null || echo "$(pwd)/src-tauri")"
 mkdir -p "$DEST_DIR"
 
 WV2_VERSION="109.0.1518.78"

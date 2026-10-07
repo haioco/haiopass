@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "HaioBypass",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "identifier": "ir.haio.bypass",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -43,7 +43,7 @@
       },
       "webviewInstallMode": {
         "type": "fixedRuntime",
-        "path": "../resources/webview2/WebView2FixedRuntime"
+        "path": "./WebView2FixedRuntime"
       },
       "wix": null
     },
