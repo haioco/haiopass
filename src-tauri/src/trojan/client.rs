@@ -13,11 +13,14 @@
 //! hex(SHA224(password))   56 bytes, lowercase ASCII hex
 //! CRLF
 //! CMD                     0x01 = CONNECT
-//! CRLF
-//! SOCKS5.ADDR             ATYP + ADDR + PORT(2, big-endian)
+//! SOCKS5.ADDR             ATYP + ADDR + PORT(2, big-endian), no separator
 //! CRLF
 //! <payload>
 //! ```
+//!
+//! Note there is no CRLF between CMD and the address — an extra one there
+//! makes trojan-gfw servers reject the request as "not trojan request" and
+//! fall back to their web server (verified against production).
 //!
 //! The server sends **no reply** — the tunnelled payload starts flowing in
 //! both directions immediately after the request (verified against the
@@ -168,11 +171,10 @@ pub async fn dial(config: &TrojanConfig, host: &str, port: u16) -> crate::error:
     })?
     .map_err(|e| HaioError::Trojan(format!("TLS handshake with {} failed: {}", addr, e)))?;
 
-    let mut request = Vec::with_capacity(56 + 2 + 1 + 2 + 1 + 256 + 2 + 2);
+    let mut request = Vec::with_capacity(56 + 2 + 1 + 1 + 1 + 256 + 2 + 2);
     request.extend_from_slice(password_hex(&config.password).as_bytes());
     request.extend_from_slice(b"\r\n");
     request.push(CMD_CONNECT);
-    request.extend_from_slice(b"\r\n");
     push_address(&mut request, host, port);
     request.extend_from_slice(b"\r\n");
 
@@ -265,13 +267,13 @@ mod tests {
         header.extend_from_slice(password_hex(&config.password).as_bytes());
         header.extend_from_slice(b"\r\n");
         header.push(CMD_CONNECT);
-        header.extend_from_slice(b"\r\n");
         push_address(&mut header, "example.org", 8080);
         header.extend_from_slice(b"\r\n");
-        // hex(56) + CRLF + CMD + CRLF + ATYP + len + "example.org"(11) + port(2) + CRLF
-        assert_eq!(header.len(), 56 + 2 + 1 + 2 + 1 + 1 + 11 + 2 + 2);
-        assert_eq!(&header[56..59], b"\r\n\x01");
-        assert_eq!(&header[59..61], b"\r\n");
+        // hex(56) + CRLF + CMD + ATYP + len + "example.org"(11) + port(2) + CRLF
+        assert_eq!(header.len(), 56 + 2 + 1 + 1 + 1 + 11 + 2 + 2);
+        assert_eq!(&header[56..58], b"\r\n");
+        assert_eq!(header[58], CMD_CONNECT);
+        assert_eq!(&header[59..61], &[ATYP_DOMAIN, 11]);
         assert_eq!(&header[header.len() - 2..], b"\r\n");
     }
 }
