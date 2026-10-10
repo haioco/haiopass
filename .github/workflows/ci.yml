@@ -44,10 +44,10 @@ jobs:
       - name: Run Rust tests
         run: cargo test --lib
 
-      - name: Build installer (compile check)
-        run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis --config ${{ matrix.config }}
+      - name: Build installers (compile check)
+        run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis,msi --config ${{ matrix.config }}
 
-      - name: Locate built installer
+      - name: Locate built installers
         shell: bash
         run: |
           set -euo pipefail
@@ -55,17 +55,25 @@ jobs:
           # not src-tauri/. Print what we produced so a mismatch is obvious.
           find target -path '*bundle/nsis/*.exe' -printf '%s  %p\n' 2>/dev/null || \
             find target -path '*bundle/nsis/*.exe' -exec ls -lh {} \;
+          find target -path '*bundle/msi/*.msi' -printf '%s  %p\n' 2>/dev/null || \
+            find target -path '*bundle/msi/*.msi' -exec ls -lh {} \;
           test -n "$(find target -path '*bundle/nsis/*.exe' -print -quit)" || {
             echo "::error::no NSIS installer under target/"
             find target -maxdepth 4 -type d -name bundle || true
             exit 1
           }
+          test -n "$(find target -path '*bundle/msi/*.msi' -print -quit)" || {
+            echo "::error::no MSI under target/"
+            exit 1
+          }
 
-      - name: Upload installer for manual testing
+      - name: Upload installers for manual testing
         uses: actions/upload-artifact@v4
         with:
           name: haiobypass-${{ matrix.variant }}-installer
-          path: target/**/bundle/nsis/*.exe
+          path: |
+            target/**/bundle/nsis/*.exe
+            target/**/bundle/msi/*.msi
           if-no-files-found: error
 
   build-linux:
