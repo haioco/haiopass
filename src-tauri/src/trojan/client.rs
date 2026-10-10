@@ -19,13 +19,15 @@
 //! <payload>
 //! ```
 //!
-//! The server replies with a single status byte (`0x00` = success) before the
-//! tunnelled payload starts flowing in both directions.
+//! The server sends **no reply** — the tunnelled payload starts flowing in
+//! both directions immediately after the request (verified against the
+//! production trojan-gfw server). Reading a "status byte" here would
+//! consume the first payload byte of every stream.
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::config::TrojanConfig;
@@ -177,15 +179,8 @@ pub async fn dial(config: &TrojanConfig, host: &str, port: u16) -> crate::error:
     tls.write_all(&request).await?;
     tls.flush().await?;
 
-    // Trojan reply: one byte, 0x00 = allowed. Read before any payload flows.
-    let mut status = [0u8; 1];
-    tls.read_exact(&mut status).await?;
-    if status[0] != 0x00 {
-        return Err(HaioError::Trojan(format!(
-            "Tunnel to {}:{} rejected by server (code {})",
-            host, port, status[0]
-        )));
-    }
+    // No server reply: the stream is a raw pipe from here. Do not read
+    // anything — the next byte belongs to the tunnelled session.
 
     tracing::debug!("Trojan tunnel established to {}:{}", host, port);
     Ok(Box::new(tls))
