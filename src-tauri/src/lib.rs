@@ -64,6 +64,23 @@ pub fn run() {
         config::Store::new()
     });
 
+    // Remove dropped payloads from versions ≤ 2.0.3. The in-process client
+    // extracts nothing; a stale haio-proxy.exe left in the config dir is
+    // itself an antivirus flag.
+    for legacy in ["haio-proxy", "haio-proxy.exe", "haio-proxy.log", "config.json"] {
+        let path = config::Store::config_dir().join(legacy);
+        if path.exists() {
+            match std::fs::remove_file(&path) {
+                Ok(()) => tracing::info!("Removed legacy artifact {}", path.display()),
+                Err(e) => tracing::warn!(
+                    "Could not remove legacy artifact {}: {}",
+                    path.display(),
+                    e
+                ),
+            }
+        }
+    }
+
     // Crash sentinel check — if sentinel exists from previous crash, restore proxy
     if config::Store::config_dir().join("proxy.sentinel").exists() {
         tracing::warn!("Crash sentinel found — restoring OS proxy and clearing presets");
@@ -103,12 +120,14 @@ pub fn run() {
             app::commands::delete_config,
             app::commands::get_state,
             app::commands::set_state,
-            app::commands::install_and_start_trojan,
+            app::commands::connect_trojan,
             app::commands::get_presets,
             app::commands::toggle_preset,
             app::commands::refresh_domains,
             app::commands::set_port,
             app::commands::set_autostart,
+            app::commands::set_proxy_consent,
+            app::commands::set_quic_block,
             app::commands::set_proxy_port,
             app::commands::check_for_updates,
             app::commands::install_update,

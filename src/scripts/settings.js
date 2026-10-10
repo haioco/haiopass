@@ -1,7 +1,8 @@
-import { invoke } from './invoke.js';
+import { invoke, listen } from './invoke.js';
 
 const presetsList = document.getElementById('presetsList');
 const autostartToggle = document.getElementById('autostartToggle');
+const quicBlockToggle = document.getElementById('quicBlockToggle');
 
 export const PRESET_LABELS = {
   gradle: 'Gradle (Android Studio)',
@@ -9,6 +10,16 @@ export const PRESET_LABELS = {
   pip: 'pip (Python)',
   docker: 'Docker',
   curl: 'curl',
+};
+
+// The exact file each preset rewrites while active — shown before the user
+// flips a toggle, per the consent requirement.
+const PRESET_FILES = {
+  gradle: '~/.gradle/gradle.properties',
+  maven: '~/.m2/settings.xml',
+  pip: 'pip.ini (Windows) / ~/.config/pip/pip.conf',
+  docker: '~/.docker/config.json',
+  curl: '~/.curlrc',
 };
 
 window.settingsModule = {
@@ -29,6 +40,7 @@ window.settingsModule = {
         <div>
           <div class="preset-name">${label}</div>
           <div class="preset-status">${isAvailable ? 'Detected' : 'Not installed'}</div>
+          <div class="preset-file">Modifies: ${PRESET_FILES[name]}</div>
         </div>
         <label class="switch" style="width:40px;height:22px;">
           <input type="checkbox" ${isEnabled ? 'checked' : ''} ${!isAvailable ? 'disabled' : ''} />
@@ -45,9 +57,33 @@ window.settingsModule = {
     }
 
     autostartToggle.checked = state.autostart || false;
+    if (quicBlockToggle) quicBlockToggle.checked = state.block_quic || false;
   }
 };
 
 autostartToggle.addEventListener('change', async () => {
   await invoke('set_autostart', { enabled: autostartToggle.checked });
 });
+
+if (quicBlockToggle) {
+  quicBlockToggle.addEventListener('change', async () => {
+    await invoke('set_quic_block', { enabled: quicBlockToggle.checked });
+  });
+}
+
+// OS proxy consent: shown once before the first system proxy takeover.
+const consentModal = document.getElementById('consentModal');
+if (consentModal) {
+  listen('consent:os-proxy', () => {
+    consentModal.classList.remove('hidden');
+  });
+
+  document.getElementById('consentAllow').addEventListener('click', async () => {
+    consentModal.classList.add('hidden');
+    await invoke('set_proxy_consent', { consent: true });
+  });
+
+  document.getElementById('consentDeny').addEventListener('click', () => {
+    consentModal.classList.add('hidden');
+  });
+}

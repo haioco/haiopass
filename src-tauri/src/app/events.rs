@@ -16,14 +16,14 @@ pub async fn emit_status_update(
     Ok(())
 }
 
+/// `running` now means "tunnel configuration is live" — there is no child
+/// process and therefore no PID to report.
 pub async fn emit_trojan_status(
     app_handle: &tauri::AppHandle,
     running: bool,
-    pid: Option<u32>,
 ) {
     let _ = app_handle.emit("trojan:status", serde_json::json!({
         "running": running,
-        "pid": pid,
     }));
 }
 

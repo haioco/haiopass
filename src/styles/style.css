@@ -273,3 +273,18 @@ header { display: flex; align-items: center; justify-content: space-between; }
   border-radius: 50%; animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* OS proxy consent dialog */
+.consent-modal {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(15, 23, 42, 0.65);
+}
+.consent-card {
+  background: #fff; border-radius: 14px; padding: 20px;
+  width: 82%; max-width: 360px; text-align: center;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+}
+.consent-card p { font-size: 12px; line-height: 1.7; color: #475569; margin: 12px 0 16px; }
+.consent-actions { display: flex; gap: 10px; justify-content: center; }
+.preset-file { font-size: 10px; color: #94a3b8; margin-top: 2px; }

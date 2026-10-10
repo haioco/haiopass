@@ -27,35 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download bundled haio-proxy binaries
-        shell: bash
-        run: bash scripts/fetch-trojan.sh
-
-      - name: Prepare fixed WebView2 runtime
-        shell: bash
-        run: |
-          if [ "${{ matrix.variant }}" = "win7" ]; then
-            bash scripts/fetch-webview2-109.sh || echo "warn: WebView2 109 fetch failed"
-            DIR=src-tauri/WebView2FixedRuntime109
-          else
-            bash scripts/fetch-webview2-fixed.sh || echo "warn: WebView2 fixed fetch failed"
-            DIR=src-tauri/WebView2FixedRuntime
-          fi
-          # Same completeness gate as the release workflow. msedge.dll is the
-          # browser core — native in 109, merged from the separate .Core nupkg
-          # in 152+. A staging without it is the half-package that cannot boot.
-          MISSING=""
-          for f in msedgewebview2.exe msedge.dll resources.pak icudtl.dat; do
-            [ -f "$DIR/$f" ] || MISSING="$MISSING $f"
-          done
-          COUNT=$(find "$DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
-          [ "${COUNT:-0}" -ge 30 ] || MISSING="$MISSING (only $COUNT files)"
-          if [ ! -d "$DIR" ] || [ -n "$MISSING" ]; then
-            echo "::error::WebView2 fixed runtime incomplete at $DIR — missing:$MISSING"
-            exit 1
-          fi
-          echo "WebView2 fixed runtime verified at $DIR"
-
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -99,10 +70,6 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download bundled haio-proxy binaries
-        shell: bash
-        run: bash scripts/fetch-trojan.sh
 
       - uses: actions/setup-node@v4
         with:

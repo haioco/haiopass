@@ -36,6 +36,11 @@ export const translations = {
     installUpdate: 'نصب و راه‌اندازی مجدد',
     updating: 'در حال بروزرسانی…',
     updateUpToDate: 'آخرین نسخه نصب شده است',
+    quicBlock: 'مسدود کردن QUIC (UDP 443) — یک قانون فایروال می\u200cسازد، نیاز به دسترسی ادمین',
+    consentTitle: 'اجازه تغییر پروکسی سیستم؟',
+    consentBody: 'برای عبور از فیلتر، هایوبایپس باید پروکسی سیستم را تنظیم کند. این کار تنظیمات پروکسی سیستم\u200cعامل شما را تغییر می\u200cدهد (ویندوز: رجیستری/PAC، لینوکس: تنظیمات پروکسی گنوم، مک: پیکربندی شبکه). همه چیز هنگام قطع اتصال بازگردانی می\u200cشود.',
+    consentDeny: 'فعلاً نه',
+    consentAllow: 'اجازه می\u200cدهم',
   },
   en: {
     appName: 'HaioBypass',
@@ -74,5 +79,10 @@ export const translations = {
     installUpdate: 'Install & Restart',
     updating: 'Updating\u2026',
     updateUpToDate: 'Up to date',
+    quicBlock: 'Block QUIC (UDP 443) \u2014 creates a firewall rule, needs admin',
+    consentTitle: 'Allow system proxy change?',
+    consentBody: 'To route blocked services, HaioBypass needs to set the system proxy. This modifies your OS proxy settings (Windows: registry/PAC, Linux: GNOME proxy settings, macOS: network configuration). Everything is restored when you disconnect.',
+    consentDeny: 'Not now',
+    consentAllow: 'Allow',
   }
 };

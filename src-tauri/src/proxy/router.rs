@@ -5,17 +5,15 @@ use tokio::sync::RwLock;
 pub struct DomainRouter {
     domains: Arc<RwLock<HashSet<String>>>,
     suffix_index: Arc<RwLock<HashMap<String, HashSet<String>>>>,
-    socks_port: u16,
 }
 
 impl DomainRouter {
-    pub fn new(domains: Vec<String>, socks_port: u16) -> Self {
+    pub fn new(domains: Vec<String>) -> Self {
         let set: HashSet<String> = domains.iter().cloned().collect();
         let suffix_index = build_suffix_index(&set);
         Self {
             domains: Arc::new(RwLock::new(set)),
             suffix_index: Arc::new(RwLock::new(suffix_index)),
-            socks_port,
         }
     }
 
@@ -58,14 +56,6 @@ impl DomainRouter {
             }
         }
         false
-    }
-
-    pub fn socks_addr(&self) -> String {
-        format!("127.0.0.1:{}", self.socks_port)
-    }
-
-    pub fn socks_port(&self) -> u16 {
-        self.socks_port
     }
 
     pub async fn get_domains(&self) -> Vec<String> {

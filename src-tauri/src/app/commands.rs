@@ -11,10 +11,11 @@ pub async fn enable_proxy(
 ) -> Result<serde_json::Value, String> {
     let state = app_handle.state::<std::sync::Arc<AppState>>();
     let config = state.config.read().await;
-    let port = config.get().proxy_port;
     let http_port = config.get().http_proxy_port;
     let presets = config.get().enabled_presets.clone();
     let cached = config.get().cached_domains.clone();
+    let proxy_consent = config.get().proxy_consent;
+    let block_quic = config.get().block_quic;
     drop(config);
 
     // 1. Determine domains (cache → fallback)
@@ -24,34 +25,33 @@ pub async fn enable_proxy(
         cached
     };
 
-    // 2. Start trojan-go first — wait for SOCKS5 port
+    // 2. Activate the in-process tunnel — no binary to extract, no port to
+    //    wait for. New proxied connections read this config as they dial.
     {
         let tc = {
             let config = state.config.read().await;
             config.get().trojan_config.clone()
         };
         if let Some(tc) = tc {
-            let mut trojan = state.trojan.write().await;
-            trojan.start(tc, port).await.map_err(|e| e.to_string())?;
+            let trojan = state.trojan.read().await;
+            trojan.set(tc).await;
         }
     }
 
-    // Emit trojan status
+    // Emit tunnel status
     {
-        let mut trojan = state.trojan.write().await;
-        let (running, pid) = trojan.status();
-        crate::app::events::emit_trojan_status(&app_handle, running, pid).await;
+        let trojan = state.trojan.read().await;
+        let running = trojan.is_connected().await;
+        crate::app::events::emit_trojan_status(&app_handle, running).await;
     }
-
-    // Wait for SOCKS5 port to become available
-    wait_for_port(port).await?;
 
     // 3. Start the local HTTP proxy
     {
         let mut proxy = state.proxy.write().await;
         if proxy.is_none() {
-            let router = proxy::router::DomainRouter::new(domains.clone(), port);
-            let server = proxy::server::ProxyServer::new(http_port, router);
+            let router = proxy::router::DomainRouter::new(domains.clone());
+            let shared_config = state.trojan.read().await.shared_config();
+            let server = proxy::server::ProxyServer::new(http_port, router, shared_config);
             *proxy = Some(server);
         }
         if let Some(s) = proxy.as_mut() {
@@ -60,13 +60,27 @@ pub async fn enable_proxy(
         }
     }
 
-    // 4. Apply OS proxy
-    {
+    // 4. Apply OS proxy — only with the user's explicit one-time consent.
+    //    The PAC/registry takeover is the system-intrusive part of the
+    //    feature; without consent we stay a plain local proxy and ask the
+    //    UI to explain what enabling the takeover would do.
+    if proxy_consent {
         let mut os_proxy = state.os_proxy.write().await;
         os_proxy.backup().await.map_err(|e| e.to_string())?;
         os_proxy.apply(format!("127.0.0.1:{}", http_port))
             .await
             .map_err(|e| e.to_string())?;
+    } else {
+        let _ = app_handle.emit("consent:os-proxy", serde_json::json!({
+            "httpPort": http_port,
+        }));
+    }
+
+    // QUIC (UDP 443) block: an elevated firewall change, applied only when
+    // the user explicitly opted in via settings — never implicitly.
+    if block_quic {
+        let mut os_proxy = state.os_proxy.write().await;
+        os_proxy.block_quic();
     }
 
     // 5. Apply app proxy presets
@@ -107,6 +121,7 @@ pub async fn enable_proxy(
 
     // 10. Emit status
     let _ = app_handle.emit("status:update", serde_json::json!({"enabled": true}));
+    crate::tray::update_status(&app_handle, true);
 
     Ok(serde_json::json!({ "success": true }))
 }
@@ -162,12 +177,12 @@ pub async fn disable_proxy(
         app_proxy.clear_all().await.map_err(|e| e.to_string())?;
     }
 
-    // Stop trojan-go
+    // Deactivate the in-process tunnel
     {
-        let mut trojan = state.trojan.write().await;
-        trojan.stop().await.map_err(|e| e.to_string())?;
+        let trojan = state.trojan.read().await;
+        trojan.clear().await;
     }
-    crate::app::events::emit_trojan_status(&app_handle, false, None).await;
+    crate::app::events::emit_trojan_status(&app_handle, false).await;
 
     // Remove sentinel
     remove_sentinel();
@@ -180,6 +195,7 @@ pub async fn disable_proxy(
     }
 
     let _ = app_handle.emit("status:update", serde_json::json!({"enabled": false}));
+    crate::tray::update_status(&app_handle, false);
 
     Ok(serde_json::json!({ "success": true }))
 }
@@ -202,6 +218,8 @@ pub async fn get_status(
         "usingCache": s.using_cache,
         "lastFetchError": s.last_fetch_error,
         "enabledPresets": s.enabled_presets,
+        "blockQuic": s.block_quic,
+        "proxyConsent": s.proxy_consent,
         "autostart": s.autostart,
         "domainSourceUrl": crate::domains::fallback::DOMAINS_URLS[0],
         "version": app_handle.package_info().version.to_string(),
@@ -284,8 +302,11 @@ pub async fn set_state(
     Ok(serde_json::json!({ "success": true }))
 }
 
+/// Activate the in-process tunnel with the saved credentials. Kept as a
+/// distinct command (previously `install_and_start_trojan`) so the UI's
+/// "connect" affordance keeps working; there is nothing to install any more.
 #[tauri::command]
-pub async fn install_and_start_trojan(
+pub async fn connect_trojan(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, std::sync::Arc<AppState>>,
 ) -> Result<serde_json::Value, String> {
@@ -294,22 +315,17 @@ pub async fn install_and_start_trojan(
         config.get().trojan_config.clone()
     };
     let tc = tc.ok_or("No access key saved. Save a key first.")?;
-    let port = {
-        let config = state.config.read().await;
-        config.get().proxy_port
-    };
 
     {
-        let mut trojan = state.trojan.write().await;
-        trojan.ensure_binary().await.map_err(|e| e.to_string())?;
-        trojan.start(tc, port).await.map_err(|e| e.to_string())?;
+        let trojan = state.trojan.read().await;
+        trojan.set(tc).await;
     }
 
-    let (running, pid) = {
-        let mut trojan = state.trojan.write().await;
-        trojan.status()
+    let running = {
+        let trojan = state.trojan.read().await;
+        trojan.is_connected().await
     };
-    crate::app::events::emit_trojan_status(&app_handle, running, pid).await;
+    crate::app::events::emit_trojan_status(&app_handle, running).await;
 
     Ok(serde_json::json!({ "success": true }))
 }
@@ -346,6 +362,73 @@ pub async fn toggle_preset(
         config.get_mut().enabled_presets.retain(|p| p != &name);
     }
     config.save().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "success": true }))
+}
+
+/// One-time consent for the OS-level proxy takeover (PAC URL / registry /
+/// gsettings / networksetup). Granting it while the bypass is active
+/// applies the takeover immediately, so the user sees the effect at once.
+#[tauri::command]
+pub async fn set_proxy_consent(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    consent: bool,
+) -> Result<serde_json::Value, String> {
+    let enabled = {
+        let mut config = state.config.write().await;
+        config.get_mut().proxy_consent = consent;
+        let _ = config.save();
+        config.get().enabled
+    };
+
+    if consent && enabled {
+        let http_port = {
+            let config = state.config.read().await;
+            config.get().http_proxy_port
+        };
+        let mut os_proxy = state.os_proxy.write().await;
+        os_proxy.backup().await.map_err(|e| e.to_string())?;
+        os_proxy.apply(format!("127.0.0.1:{}", http_port))
+            .await
+            .map_err(|e| e.to_string())?;
+    } else if !consent {
+        // Revoking consent also undoes a live takeover.
+        let mut os_proxy = state.os_proxy.write().await;
+        os_proxy.clear().await.map_err(|e| e.to_string())?;
+    }
+
+    let _ = app_handle.emit("status:update", serde_json::json!({
+        "enabled": enabled,
+    }));
+
+    Ok(serde_json::json!({ "success": true }))
+}
+
+/// Explicit opt-in for the QUIC (UDP 443) firewall block. This is the only
+/// code path that creates the firewall rule — it needs elevated privileges
+/// and is labelled as such in the UI.
+#[tauri::command]
+pub async fn set_quic_block(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    enabled: bool,
+) -> Result<serde_json::Value, String> {
+    {
+        let mut config = state.config.write().await;
+        config.get_mut().block_quic = enabled;
+        config.save().map_err(|e| e.to_string())?;
+    }
+
+    let bypass_active = { state.config.read().await.get().enabled };
+
+    {
+        let mut os_proxy = state.os_proxy.write().await;
+        if enabled && bypass_active {
+            os_proxy.block_quic();
+        } else {
+            os_proxy.force_unblock_quic();
+        }
+    }
+
     Ok(serde_json::json!({ "success": true }))
 }
 
@@ -463,8 +546,8 @@ pub async fn quit_and_cleanup(state: std::sync::Arc<AppState>) -> Result<(), Str
     let mut app_proxy = state.app_proxy.write().await;
     app_proxy.clear_all().await.map_err(|e| e.to_string())?;
 
-    let mut trojan = state.trojan.write().await;
-    trojan.stop().await.map_err(|e| e.to_string())?;
+    let trojan = state.trojan.read().await;
+    trojan.clear().await;
 
     remove_sentinel();
 
@@ -472,22 +555,6 @@ pub async fn quit_and_cleanup(state: std::sync::Arc<AppState>) -> Result<(), Str
 }
 
 // --- Helper functions ---
-
-async fn wait_for_port(port: u16) -> Result<(), String> {
-    let addr = format!("127.0.0.1:{}", port);
-    for i in 0..15 {
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            tokio::net::TcpStream::connect(&addr),
-        ).await;
-        if let Ok(Ok(_)) = result {
-            return Ok(());
-        }
-        tracing::warn!("wait_for_port: attempt {}/15 failed for {}", i + 1, port);
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    }
-    Err(format!("Timed out waiting for port {} after 15 attempts", port))
-}
 
 fn write_sentinel() -> std::io::Result<()> {
     let path = config::Store::config_dir().join("proxy.sentinel");
@@ -529,13 +596,13 @@ fn start_health_monitor(
         loop {
             interval.tick().await;
 
-            // Get port config
-            let (http_port, socks_port, enabled) = {
+            // Get current configuration
+            let (http_port, enabled, trojan_config) = {
                 let config = state.config.read().await;
                 (
                     config.get().http_proxy_port,
-                    config.get().proxy_port,
                     config.get().enabled,
+                    config.get().trojan_config.clone(),
                 )
             };
 
@@ -543,7 +610,8 @@ fn start_health_monitor(
                 break;
             }
 
-            let health = crate::health::check_trojan_health(http_port, socks_port).await;
+            let health =
+                crate::health::check_trojan_health(http_port, trojan_config.as_ref()).await;
 
             if health.all_healthy {
                 if consecutive_failures > 0 {
@@ -553,65 +621,31 @@ fn start_health_monitor(
                 let _ = app_handle.emit("health:check", serde_json::json!({
                     "ok": true,
                     "httpPort": http_port,
-                    "socksPort": socks_port,
                 }));
             } else {
                 consecutive_failures += 1;
                 tracing::warn!(
-                    "Health check failed (http={}, socks={}, failures={})",
+                    "Health check failed (http={}, tunnel={}, failures={})",
                     health.http_proxy_ok,
-                    health.socks5_ok,
+                    health.tunnel_ok,
                     consecutive_failures
                 );
 
                 let _ = app_handle.emit("health:check", serde_json::json!({
                     "ok": false,
                     "httpPort": http_port,
-                    "socksPort": socks_port,
+                    "tunnelOk": health.tunnel_ok,
                     "consecutiveFailures": consecutive_failures,
                 }));
 
-                // If SOCKS5 is down but trojan manager says it should be running,
-                // try to signal the watchdog to restart
-                if !health.socks5_ok && consecutive_failures >= 2 {
-                    // Re-check enabled — user may have clicked Disconnect while we were checking
-                    let still_enabled = { state.config.read().await.get().enabled };
-                    if !still_enabled {
-                        break;
-                    }
-                    let mut trojan = state.trojan.write().await;
-                    let (running, _) = trojan.status();
-                    if running {
-                        // Process says it's running but port is down — it's probably hung
-                        tracing::warn!("Trojan-go process alive but SOCKS5 port unresponsive, stopping to trigger restart");
-                        let _ = trojan.stop().await;
-                    }
-
-                    // If HTTP proxy is also down, restart the whole proxy stack
-                    if !health.http_proxy_ok && consecutive_failures >= 3 {
-                        let still_enabled2 = { state.config.read().await.get().enabled };
-                        if !still_enabled2 {
-                            break;
-                        }
-                        tracing::warn!("Full proxy stack down, attempting restart");
-                        drop(trojan);
-                        // The enable_proxy command would need to be called from frontend,
-                        // but we can try to restart just the trojan part
-                        let tc = {
-                            let config = state.config.read().await;
-                            config.get().trojan_config.clone()
-                        };
-                        let port = {
-                            let config = state.config.read().await;
-                            config.get().proxy_port
-                        };
-                        if let Some(tc) = tc {
-                            let mut trojan = state.trojan.write().await;
-                            if let Err(e) = trojan.start(tc, port).await {
-                                tracing::error!("Auto-restart trojan failed: {}", e);
-                            }
-                        }
-                    }
+                // No silent auto-restart: with an in-process client there is
+                // no process to respawn, and restart-on-failure is itself a
+                // backdoor-shaped behaviour. Tell the UI and let the user
+                // decide to reconnect.
+                if consecutive_failures >= 2 {
+                    let _ = app_handle.emit("health:failed", serde_json::json!({
+                        "consecutiveFailures": consecutive_failures,
+                    }));
                 }
             }
         }
@@ -633,18 +667,31 @@ pub async fn refresh_domains_inner(
             }
             drop(proxy);
 
-            // Update config
-            let mut config = state.config.write().await;
-            config.get_mut().cached_domains = domains;
-            config.get_mut().last_fetch = Some(chrono::Utc::now().timestamp());
-            config.get_mut().using_fallback = false;
-            config.get_mut().using_cache = false;
-            config.get_mut().last_fetch_error = None;
-            let _ = config.save();
-            drop(config);
+            // Update config, keeping the diff so the user can see what a
+            // remote list update actually changed.
+            let (previous_len, added, removed) = {
+                let mut config = state.config.write().await;
+                let previous: std::collections::HashSet<String> =
+                    config.get().cached_domains.iter().cloned().collect();
+                let added = domains.iter().filter(|d| !previous.contains(*d)).count();
+                let removed = previous
+                    .iter()
+                    .filter(|p| !domains.contains(*p))
+                    .count();
+                config.get_mut().cached_domains = domains;
+                config.get_mut().last_fetch = Some(chrono::Utc::now().timestamp());
+                config.get_mut().using_fallback = false;
+                config.get_mut().using_cache = false;
+                config.get_mut().last_fetch_error = None;
+                let _ = config.save();
+                (previous.len(), added, removed)
+            };
 
             let _ = app_handle.emit("domains:updated", serde_json::json!({
                 "count": state.config.read().await.get().cached_domains.len(),
+                "previousCount": previous_len,
+                "added": added,
+                "removed": removed,
                 "usingFallback": false,
             }));
         }

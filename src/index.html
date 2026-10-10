@@ -111,6 +111,28 @@
           <span data-i18n="autostart">Start with system</span>
           <input type="checkbox" id="autostartToggle" />
         </label>
+        <label class="preset-toggle">
+          <span data-i18n="quicBlock">Block QUIC (UDP 443) — creates a firewall rule, needs admin</span>
+          <input type="checkbox" id="quicBlockToggle" />
+        </label>
+      </div>
+    </div>
+
+    <!-- OS proxy consent dialog: shown once, before the first system
+         proxy takeover. Names exactly what will be modified. -->
+    <div class="consent-modal hidden" id="consentModal">
+      <div class="consent-card">
+        <span class="card-label" data-i18n="consentTitle">Allow system proxy change?</span>
+        <p data-i18n="consentBody">
+          To route blocked services, HaioBypass needs to set the system proxy.
+          This modifies your OS proxy settings (Windows: registry/PAC URL,
+          Linux: GNOME proxy settings, macOS: network configuration).
+          Everything is restored when you disconnect.
+        </p>
+        <div class="consent-actions">
+          <button class="btn-back" id="consentDeny" data-i18n="consentDeny">Not now</button>
+          <button class="btn-settings" id="consentAllow" data-i18n="consentAllow">Allow</button>
+        </div>
       </div>
     </div>
 
