@@ -41,6 +41,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Run Rust tests
+        run: cargo test --lib
+
       - name: Build installer (compile check)
         run: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles nsis --config ${{ matrix.config }}
 
@@ -84,6 +87,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm install
+
+      - name: Run Rust tests
+        run: cargo test --lib
 
       - name: Build
         run: npm run tauri build -- --bundles deb
