@@ -126,6 +126,7 @@ pub fn run() {
             app::commands::refresh_domains,
             app::commands::set_port,
             app::commands::set_autostart,
+            app::commands::set_minimize_to_tray,
             app::commands::set_proxy_consent,
             app::commands::set_quic_block,
             app::commands::set_proxy_port,
@@ -177,10 +178,18 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let app_handle = window.app_handle().clone();
+                let window = window.clone();
                 let state = window_state.clone();
                 tauri::async_runtime::spawn(async move {
-                    let _ = crate::app::commands::quit_and_cleanup(state).await;
-                    app_handle.exit(0);
+                    let hide_to_tray = state.config.read().await.get().minimize_to_tray;
+                    if hide_to_tray {
+                        // Keep running in the tray — the bypass stays active;
+                        // restoring the window is one tray click away.
+                        let _ = window.hide();
+                    } else {
+                        let _ = crate::app::commands::quit_and_cleanup(state).await;
+                        app_handle.exit(0);
+                    }
                 });
             }
         })

@@ -404,6 +404,20 @@ pub async fn set_proxy_consent(
     Ok(serde_json::json!({ "success": true }))
 }
 
+/// Whether the window close (X) button hides to the tray instead of
+/// quitting. Quitting (with full state restore) remains available from the
+/// tray menu.
+#[tauri::command]
+pub async fn set_minimize_to_tray(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    enabled: bool,
+) -> Result<serde_json::Value, String> {
+    let mut config = state.config.write().await;
+    config.get_mut().minimize_to_tray = enabled;
+    config.save().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "success": true }))
+}
+
 /// Explicit opt-in for the QUIC (UDP 443) firewall block. This is the only
 /// code path that creates the firewall rule — it needs elevated privileges
 /// and is labelled as such in the UI.

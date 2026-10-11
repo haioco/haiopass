@@ -2,6 +2,7 @@ import { invoke, listen } from './invoke.js';
 
 const presetsList = document.getElementById('presetsList');
 const autostartToggle = document.getElementById('autostartToggle');
+const closeToTrayToggle = document.getElementById('closeToTrayToggle');
 const quicBlockToggle = document.getElementById('quicBlockToggle');
 
 export const PRESET_LABELS = {
@@ -57,6 +58,7 @@ window.settingsModule = {
     }
 
     autostartToggle.checked = state.autostart || false;
+    if (closeToTrayToggle) closeToTrayToggle.checked = state.minimize_to_tray !== false;
     if (quicBlockToggle) quicBlockToggle.checked = state.block_quic || false;
   }
 };
@@ -64,6 +66,12 @@ window.settingsModule = {
 autostartToggle.addEventListener('change', async () => {
   await invoke('set_autostart', { enabled: autostartToggle.checked });
 });
+
+if (closeToTrayToggle) {
+  closeToTrayToggle.addEventListener('change', async () => {
+    await invoke('set_minimize_to_tray', { enabled: closeToTrayToggle.checked });
+  });
+}
 
 if (quicBlockToggle) {
   quicBlockToggle.addEventListener('change', async () => {
