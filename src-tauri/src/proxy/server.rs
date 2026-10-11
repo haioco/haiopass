@@ -7,6 +7,8 @@ use tokio::sync::{RwLock, Notify};
 use super::router::DomainRouter;
 use super::socks;
 use super::pac;
+use crate::config::TrojanConfig;
+use crate::trojan::manager::SharedTrojanConfig;
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -14,16 +16,18 @@ pub struct ProxyServer {
     handle: Option<tokio::task::JoinHandle<()>>,
     port: u16,
     router: Arc<DomainRouter>,
+    trojan_config: SharedTrojanConfig,
     running: Arc<RwLock<bool>>,
     notify: Arc<Notify>,
 }
 
 impl ProxyServer {
-    pub fn new(port: u16, router: DomainRouter) -> Self {
+    pub fn new(port: u16, router: DomainRouter, trojan_config: SharedTrojanConfig) -> Self {
         Self {
             handle: None,
             port,
             router: Arc::new(router),
+            trojan_config,
             running: Arc::new(RwLock::new(false)),
             notify: Arc::new(Notify::new()),
         }
@@ -45,6 +49,7 @@ impl ProxyServer {
         *self.running.write().await = true;
 
         let router = self.router.clone();
+        let trojan_config = self.trojan_config.clone();
         let running = self.running.clone();
         let port = self.port;
         let notify = self.notify.clone();
@@ -60,7 +65,8 @@ impl ProxyServer {
                         match result {
                             Ok((stream, _)) => {
                                 let router = router.clone();
-                                tokio::spawn(handle_connection(stream, router, port));
+                                let trojan_config = trojan_config.clone();
+                                tokio::spawn(handle_connection(stream, router, trojan_config, port));
                             }
                             Err(e) => {
                                 if !*running.read().await {
@@ -88,9 +94,46 @@ impl ProxyServer {
     }
 }
 
+/// Read the live tunnel configuration and open a tunnelled connection.
+/// Preserves the one-retry semantics the old SOCKS5 dialer had.
+async fn dial_trojan(
+    trojan_config: &SharedTrojanConfig,
+    host: &str,
+    port: u16,
+) -> crate::error::Result<crate::trojan::client::TrojanStream> {
+    let config: TrojanConfig = trojan_config
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| {
+            crate::error::HaioError::Proxy(
+                "Tunnel is not connected — no server credentials are set".into(),
+            )
+        })?;
+
+    match crate::trojan::client::dial(&config, host, port).await {
+        Ok(stream) => Ok(stream),
+        Err(e) => {
+            tracing::warn!("Tunnel dial to {}:{} failed once, retrying: {}", host, port, e);
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let config: TrojanConfig = trojan_config
+                .read()
+                .await
+                .clone()
+                .ok_or_else(|| {
+                    crate::error::HaioError::Proxy(
+                        "Tunnel is not connected — no server credentials are set".into(),
+                    )
+                })?;
+            crate::trojan::client::dial(&config, host, port).await
+        }
+    }
+}
+
 async fn handle_connection(
     stream: tokio::net::TcpStream,
     router: Arc<DomainRouter>,
+    trojan_config: SharedTrojanConfig,
     pac_port: u16,
 ) {
     // Read the initial request line and headers using a timeout
@@ -138,7 +181,7 @@ async fn handle_connection(
         let mut stream = stream;
 
         if router.should_proxy(host).await {
-            match socks::dial_socks5(&router.socks_addr(), host, port).await {
+            match dial_trojan(&trojan_config, host, port).await {
                 Ok(mut remote) => {
                     let _ = stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await;
                     let result = tokio::time::timeout(
@@ -158,7 +201,7 @@ async fn handle_connection(
                     }
                 }
                 Err(e) => {
-                    tracing::error!("SOCKS5 connect to {}:{} failed: {}", host, port, e);
+                    tracing::error!("Tunnel connect to {}:{} failed: {}", host, port, e);
                     let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
                 }
             }
@@ -220,7 +263,7 @@ async fn handle_connection(
             let mut stream = stream;
 
             if router.should_proxy(host).await {
-                match socks::dial_socks5(&router.socks_addr(), host, port).await {
+                match dial_trojan(&trojan_config, host, port).await {
                     Ok(mut remote) => {
                         let _ = remote.write_all(origin_line.as_bytes()).await;
                         let result = tokio::time::timeout(
@@ -236,7 +279,7 @@ async fn handle_connection(
                         }
                     }
                     Err(e) => {
-                        tracing::error!("SOCKS5 connect to {}:{} failed: {}", host, port, e);
+                        tracing::error!("Tunnel connect to {}:{} failed: {}", host, port, e);
                         let _ = stream.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
                     }
                 }

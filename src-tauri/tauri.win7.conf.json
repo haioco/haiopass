@@ -36,17 +36,15 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "resources": ["../resources/trojan-go/*"],
+    "resources": [],
     "windows": {
       "nsis": {
         "installMode": "both",
         "displayLanguageSelector": true
       },
       "webviewInstallMode": {
-        "type": "fixedRuntime",
-        "path": "./WebView2FixedRuntime109"
-      },
-      "wix": null
+        "type": "embedBootstrapper"
+      }
     },
     "linux": {
       "appimage": { "bundleMediaFramework": false },

@@ -359,9 +359,8 @@ portInput.addEventListener('change', async () => {
 });
 
 btnSetup.addEventListener('click', async () => {
-  const t = translations[currentLang];
-  setLoading(true, 'Installing\u2026');
-  const res = await invoke('install_and_start_trojan');
+  setLoading(true, 'Connecting\u2026');
+  const res = await invoke('connect_trojan');
   setLoading(false);
 
   if (res.success) {
@@ -370,7 +369,7 @@ btnSetup.addEventListener('click', async () => {
     trojanStatus.classList.remove('hidden');
     trojanStatusText.textContent = 'Cloud engine is running';
   } else {
-    showError(res.error || 'Install failed');
+    showError(res.error || 'Connect failed');
   }
 });
 
@@ -425,7 +424,7 @@ listen('trojan:status', (data) => {
     btnSetup.textContent = '\u2713 Running';
     btnSetup.disabled = true;
     trojanStatus.classList.remove('hidden');
-    trojanStatusText.textContent = `Running (PID ${data.pid})`;
+    trojanStatusText.textContent = 'Connected';
   } else {
     btnSetup.textContent = translations[currentLang].installStart;
     btnSetup.disabled = false;

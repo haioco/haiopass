@@ -40,6 +40,10 @@ pub struct State {
     pub last_fetch_error: Option<String>,
     #[serde(default)]
     pub enabled_presets: Vec<String>,
+    #[serde(default)]
+    pub block_quic: bool,
+    #[serde(default)]
+    pub proxy_consent: bool,
     #[serde(default = "default_autostart")]
     pub autostart: bool,
     #[serde(default = "default_minimize_to_tray")]
@@ -67,7 +71,9 @@ impl Default for State {
             using_fallback: false,
             using_cache: false,
             last_fetch_error: None,
-            enabled_presets: vec!["gradle".into()],
+            enabled_presets: Vec::new(),
+            block_quic: false,
+            proxy_consent: false,
             autostart: false,
             minimize_to_tray: true,
             last_update_at: None,

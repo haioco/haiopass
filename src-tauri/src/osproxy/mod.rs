@@ -24,9 +24,10 @@ impl OsProxy {
         Self { backup: None, applied: false, quic_blocked: false }
     }
 
-    /// Best-effort QUIC (UDP 443) block so browsers fall back to TCP over
-    /// the local proxy instead of failing with ERR_QUIC_PROTOCOL_ERROR.
-    fn block_quic(&mut self) {
+    /// Explicitly requested QUIC (UDP 443) block — an elevated, system-wide
+    /// firewall change, so it only ever happens when the user opted in via
+    /// settings, never as a side effect of connecting.
+    pub fn block_quic(&mut self) {
         match quic::block() {
             Ok(()) => {
                 self.quic_blocked = true;
@@ -43,6 +44,15 @@ impl OsProxy {
         if !self.quic_blocked {
             return;
         }
+        if let Err(e) = quic::unblock() {
+            tracing::warn!("Failed to remove QUIC block rule: {}", e);
+        }
+        self.quic_blocked = false;
+    }
+
+    /// Force-remove any QUIC block rule (used when the user turns the
+    /// setting off, regardless of whether this process added it).
+    pub fn force_unblock_quic(&mut self) {
         if let Err(e) = quic::unblock() {
             tracing::warn!("Failed to remove QUIC block rule: {}", e);
         }
@@ -75,7 +85,6 @@ impl OsProxy {
         #[cfg(target_os = "macos")]
         macos::set_proxy(&addr)?;
         self.applied = true;
-        self.block_quic();
         Ok(())
     }
 

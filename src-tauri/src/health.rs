@@ -1,5 +1,8 @@
-use tokio::net::TcpStream;
 use std::time::Duration;
+
+use tokio::net::TcpStream;
+
+use crate::config::TrojanConfig;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -21,34 +24,35 @@ pub async fn check_proxy_health(
     (ok, http_proxy_port)
 }
 
-pub async fn check_socks5_health(socks_port: u16) -> bool {
-    let addr = format!("127.0.0.1:{}", socks_port);
-    tokio::time::timeout(
-        CONNECT_TIMEOUT,
-        TcpStream::connect(&addr),
-    )
-    .await
-    .ok()
-    .and_then(|r| r.ok())
-    .is_some()
+/// Whether the configured Trojan server is reachable and its certificate
+/// still validates. With the in-process client there is no local SOCKS port
+/// to poll — the server itself is the thing that can be up or down.
+pub async fn check_tunnel_health(config: &TrojanConfig) -> bool {
+    crate::trojan::client::probe(config).await
 }
 
 pub async fn check_trojan_health(
     http_proxy_port: u16,
-    socks_port: u16,
-) -> TrojonHealthResult {
+    trojan_config: Option<&TrojanConfig>,
+) -> TrojanHealthResult {
     let http_ok = check_proxy_health(http_proxy_port, &[]).await.0;
-    let socks_ok = check_socks5_health(socks_port).await;
+    // With no credentials set the tunnel is "healthy by definition" — the
+    // HTTP proxy is what matters, and the health monitor only runs while
+    // the proxy is enabled.
+    let tunnel_ok = match trojan_config {
+        Some(cfg) => check_tunnel_health(cfg).await,
+        None => false,
+    };
 
-    TrojonHealthResult {
+    TrojanHealthResult {
         http_proxy_ok: http_ok,
-        socks5_ok: socks_ok,
-        all_healthy: http_ok && socks_ok,
+        tunnel_ok,
+        all_healthy: http_ok && tunnel_ok,
     }
 }
 
-pub struct TrojonHealthResult {
+pub struct TrojanHealthResult {
     pub http_proxy_ok: bool,
-    pub socks5_ok: bool,
+    pub tunnel_ok: bool,
     pub all_healthy: bool,
 }

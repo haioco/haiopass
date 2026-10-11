@@ -24,9 +24,6 @@ mod imp {
     const RUNTIME_EXE: &str = "msedgewebview2.exe";
     /// The WebView2 loader checks this env var BEFORE the registry: when set,
     /// the folder it names is the only runtime the loader will ever use.
-    /// Tauri never sets it (wry passes `null` as the browser executable
-    /// folder), so without this line the bundled fixed runtime ships in the
-    /// installer but is never wired up.
     const WEBVIEW2_RUNTIME_ENV: &str = "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER";
     const RETRY_COOLDOWN: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -100,72 +97,18 @@ mod imp {
             .unwrap_or(false)
     }
 
-    /// A fixed runtime shipped with the app has no registry entry of its own,
-    /// so validate the folder itself: presence alone is not enough — an
-    /// incomplete payload fails exactly like a missing one.
-    ///
-    /// Two layouts are known:
-    /// - since 2.0.3 the folder sits directly next to the exe
-    ///   (`$INSTDIR\WebView2FixedRuntime*`), and
-    /// - 2.0.2 and earlier extracted it under `_up_\resources\webview2\`
-    ///   because tauri-utils rewrites every `..` component of a resource
-    ///   path into `_up_`.
-    fn bundled_runtime() -> Option<PathBuf> {
-        let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-        let search_roots = [
-            exe_dir.clone(),
-            // 2.0.2-and-earlier layout (updater users run through this).
-            exe_dir.join("_up_").join("resources").join("webview2"),
-            exe_dir.join("resources").join("webview2"),
-        ];
-        for root in &search_roots {
-            let Ok(entries) = std::fs::read_dir(root) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with("WebView2FixedRuntime")
-                    && entry.path().join(RUNTIME_EXE).is_file()
-                {
-                    return Some(entry.path());
-                }
-            }
-        }
-        None
-    }
-
-    /// Point the WebView2 loader at a usable runtime.
-    ///
-    /// - With a bundled fixed runtime: set the env var so the loader uses it
-    ///   unconditionally. This is the only way the bundled runtime is ever
-    ///   found — wry passes `null` to `CreateCoreWebView2EnvironmentWithOptions`,
-    ///   so without the env var the loader ignores the bundled copy entirely
-    ///   and falls back to the registry (which is exactly the
-    ///   "Could not find the WebView2 Runtime" failure on machines that have
-    ///   no Evergreen runtime).
-    /// - Without one: an inherited (machine/user-level) env var pointing at
-    ///   a dead folder makes the loader skip the system runtime too — clear
-    ///   it so registry resolution works again.
-    fn ensure_webview_env(bundled: Option<&Path>) {
-        match bundled {
-            Some(dir) => {
-                tracing::info!(
-                    "Using bundled WebView2 fixed runtime: {}",
-                    dir.display()
+    /// Clear a stale WEBVIEW2_BROWSER_EXECUTABLE_FOLDER env var that points at
+    /// an unusable runtime — an inherited (machine/user-level) value makes the
+    /// loader skip the system runtime too.
+    fn ensure_webview_env() {
+        if let Ok(value) = std::env::var(WEBVIEW2_RUNTIME_ENV) {
+            if !Path::new(&value).join(RUNTIME_EXE).is_file() {
+                tracing::warn!(
+                    "Clearing stale {} (points at unusable {})",
+                    WEBVIEW2_RUNTIME_ENV,
+                    value
                 );
-                std::env::set_var(WEBVIEW2_RUNTIME_ENV, dir);
-            }
-            None => {
-                if let Ok(value) = std::env::var(WEBVIEW2_RUNTIME_ENV) {
-                    if !Path::new(&value).join(RUNTIME_EXE).is_file() {
-                        tracing::warn!(
-                            "Clearing stale {} (points at unusable {})",
-                            WEBVIEW2_RUNTIME_ENV,
-                            value
-                        );
-                        std::env::remove_var(WEBVIEW2_RUNTIME_ENV);
-                    }
-                }
+                std::env::remove_var(WEBVIEW2_RUNTIME_ENV);
             }
         }
     }
@@ -192,10 +135,43 @@ mod imp {
         );
     }
 
+    /// Temp working dir for the WebView2 repair path. Product-branded so its
+    /// contents are attributable when users or AV inspect temp.
+    const REPAIR_DIR_NAME: &str = "HaioBypass-WebView2-Repair";
+
+    fn repair_dir() -> PathBuf {
+        std::env::temp_dir().join(REPAIR_DIR_NAME)
+    }
+
     fn installer_path() -> PathBuf {
-        std::env::temp_dir()
-            .join("haiobypass-webview2")
-            .join("MicrosoftEdgeWebview2Setup.exe")
+        repair_dir().join("MicrosoftEdgeWebview2Setup.exe")
+    }
+
+    /// Verify the downloaded installer's Authenticode signature: status
+    /// `Valid` AND signer organization `Microsoft Corporation`, before it is
+    /// ever executed. A hash pin cannot work here — Microsoft re-releases the
+    /// Evergreen bootstrapper periodically — so the publisher identity is the
+    /// stable invariant. Uses PowerShell's Get-AuthenticodeSignature
+    /// (WinVerifyTrust) instead of executing anything downloaded.
+    fn verify_installer_signature(exe: &Path) -> Result<(), String> {
+        let script = format!(
+            "$sig = Get-AuthenticodeSignature -FilePath '{}'; \
+             if ($sig.Status -ne 'Valid') {{ exit 3 }} \
+             if ($sig.SignerCertificate.Subject -notlike '*Microsoft Corporation*') {{ exit 4 }} \
+             exit 0",
+            exe.display()
+        );
+        let status = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .status()
+            .map_err(|e| format!("signature check failed to start: {}", e))?;
+        match status.code() {
+            Some(0) => Ok(()),
+            Some(3) => Err("installer signature is not valid".into()),
+            Some(4) => Err("installer is not signed by Microsoft Corporation".into()),
+            Some(code) => Err(format!("signature check failed (exit {})", code)),
+            None => Err("signature check was terminated".into()),
+        }
     }
 
     /// Download the Evergreen standalone installer over HTTPS.
@@ -247,8 +223,13 @@ mod imp {
     }
 
     /// Run the installer for the current user and wait for a *usable* runtime.
+    /// The downloaded file must first prove it is a validly-signed Microsoft
+    /// binary — download-execute from temp without that check is exactly the
+    /// dropper shape behavioural engines score.
     fn run_installer() -> Result<(), String> {
         let exe = installer_path();
+        verify_installer_signature(&exe)?;
+
         let status = std::process::Command::new(&exe)
             .args(["/silent", "/install"])
             .status()
@@ -271,7 +252,7 @@ mod imp {
     /// Native message box — used when the webview cannot be trusted to render UI.
     /// Text goes through temp UTF-8 files so Persian survives the command line.
     fn native_dialog(title: &str, body: &str) {
-        let dir = std::env::temp_dir().join("haiobypass-webview2");
+        let dir = repair_dir();
         if std::fs::create_dir_all(&dir).is_err() {
             return;
         }
@@ -321,13 +302,7 @@ mod imp {
     }
 
     pub fn preflight() {
-        let bundled = bundled_runtime();
-        if let Some(dir) = &bundled {
-            tracing::info!("Bundled WebView2 fixed runtime verified: {}", dir.display());
-            ensure_webview_env(Some(dir));
-            return;
-        }
-        ensure_webview_env(None);
+        ensure_webview_env();
 
         if runtime_is_usable() {
             match runtime_registration() {
