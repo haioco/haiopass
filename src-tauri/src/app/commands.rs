@@ -118,10 +118,15 @@ pub async fn enable_proxy(
         *health_handle = Some(start_health_monitor(arc_state.clone(), app_handle.clone()));
     }
 
-    // 10. Do initial domain fetch
-    refresh_domains_inner(state.inner().clone(), app_handle.clone()).await;
+    // 10. Refresh the remote domain list in the background. The proxy is
+    //     already serving traffic at this point; waiting for this fetch made
+    //     the toggle hang for up to 10s on a slow network.
+    tauri::async_runtime::spawn(refresh_domains_inner(
+        state.inner().clone(),
+        app_handle.clone(),
+    ));
 
-    // 10. Emit status
+    // 11. Emit status
     let _ = app_handle.emit("status:update", serde_json::json!({"enabled": true}));
     crate::tray::update_status(&app_handle, true);
 
@@ -213,7 +218,6 @@ pub async fn get_status(
         "enabled": s.enabled,
         "domainCount": s.cached_domains.len(),
         "bypassCount": s.bypass_domains.len(),
-        "domains": s.cached_domains,
         "proxyPort": s.proxy_port,
         "httpProxyPort": s.http_proxy_port,
         "lastFetch": s.last_fetch,
@@ -816,10 +820,15 @@ pub async fn refresh_domains_inner(
                 let mut config = state.config.write().await;
                 let previous: std::collections::HashSet<String> =
                     config.get().cached_domains.iter().cloned().collect();
-                let added = domains.iter().filter(|d| !previous.contains(*d)).count();
+                let next: std::collections::HashSet<&str> =
+                    domains.iter().map(String::as_str).collect();
+                let added = domains
+                    .iter()
+                    .filter(|d| !previous.contains(d.as_str()))
+                    .count();
                 let removed = previous
                     .iter()
-                    .filter(|p| !domains.contains(*p))
+                    .filter(|p| !next.contains(p.as_str()))
                     .count();
                 config.get_mut().cached_domains = domains;
                 config.get_mut().last_fetch = Some(chrono::Utc::now().timestamp());

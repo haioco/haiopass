@@ -305,7 +305,7 @@ function domainCountText(data) {
   return `${Number(data.domainCount).toLocaleString()} ${suffix}`;
 }
 
-function applyStatusLabels(data) {
+function applyStatusLabels(data, skipHealth = false) {
   const t = translations[currentLang];
   const enabled = Boolean(data.enabled);
   toggle.checked = enabled;
@@ -330,7 +330,7 @@ function applyStatusLabels(data) {
   }
 
   if (enabled) {
-    runHealthCheck();
+    if (!skipHealth) runHealthCheck();
   } else {
     setConn('off', t.proxyOff);
   }
@@ -541,7 +541,7 @@ btnDeleteConfig.addEventListener('click', async () => {
 /* Status & connection                                                 */
 /* ------------------------------------------------------------------ */
 
-async function loadStatus() {
+async function loadStatus(options = {}) {
   let data;
   try {
     data = await invoke('get_status');
@@ -551,7 +551,7 @@ async function loadStatus() {
   }
 
   lastStatus = data;
-  applyStatusLabels(data);
+  applyStatusLabels(data, Boolean(options.skipHealth));
 
   if (data.lastFetchError && (data.usingFallback || data.usingCache)) {
     if (data.lastFetchError !== lastDomainError) {
@@ -910,6 +910,10 @@ listen('health:check', (data) => {
   } else {
     setConn('checking', t.checking);
   }
+});
+
+listen('domains:updated', () => {
+  if (toggle.checked) loadStatus({ skipHealth: true });
 });
 
 listen('health:failed', () => {
