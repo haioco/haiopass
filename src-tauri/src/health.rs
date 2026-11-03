@@ -35,14 +35,18 @@ pub async fn check_trojan_health(
     http_proxy_port: u16,
     trojan_config: Option<&TrojanConfig>,
 ) -> TrojanHealthResult {
-    let http_ok = check_proxy_health(http_proxy_port, &[]).await.0;
-    // With no credentials set the tunnel is "healthy by definition" — the
-    // HTTP proxy is what matters, and the health monitor only runs while
-    // the proxy is enabled.
-    let tunnel_ok = match trojan_config {
-        Some(cfg) => check_tunnel_health(cfg).await,
-        None => false,
+    // Run both probes concurrently: the local port check is cheap, but the
+    // TLS probe can take up to a few seconds on a bad link. Sequential checks
+    // made the UI wait for the sum of both timeouts.
+    let http_probe = check_proxy_health(http_proxy_port, &[]);
+    let tunnel_probe = async {
+        match trojan_config {
+            Some(cfg) => check_tunnel_health(cfg).await,
+            // No credentials means we cannot prove the tunnel works.
+            None => false,
+        }
     };
+    let ((http_ok, _), tunnel_ok) = tokio::join!(http_probe, tunnel_probe);
 
     TrojanHealthResult {
         http_proxy_ok: http_ok,

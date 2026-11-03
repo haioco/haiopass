@@ -372,7 +372,11 @@ async function runHealthCheck() {
 
   try {
     const res = await invoke('test_connection');
-    if (res && res.ok) {
+    if (res && res.httpProxyOk === false) {
+      setConn('failed', t.proxyDown);
+    } else if (res && res.tunnelOk === false) {
+      setConn('failed', t.failed);
+    } else if (res && res.ok) {
       setConn('connected', t.connected);
     } else {
       setConn('failed', t.failed);
@@ -899,6 +903,8 @@ listen('health:check', (data) => {
   const t = translations[currentLang];
   if (data.ok) {
     setConn('connected', t.connected);
+  } else if (data.httpProxyOk === false) {
+    setConn('failed', t.proxyDown);
   } else if (data.tunnelOk === false) {
     setConn('failed', t.failed);
   } else {

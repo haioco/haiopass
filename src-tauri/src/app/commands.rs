@@ -234,13 +234,23 @@ pub async fn get_status(
 pub async fn test_connection(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
 ) -> Result<serde_json::Value, String> {
-    let config = state.config.read().await;
-    let http_port = config.get().http_proxy_port;
-    let cached = config.get().cached_domains.clone();
-    drop(config);
+    let (http_port, trojan_config) = {
+        let config = state.config.read().await;
+        let state = config.get();
+        (state.http_proxy_port, state.trojan_config.clone())
+    };
 
-    let (ok, _) = crate::health::check_proxy_health(http_port, &cached).await;
-    Ok(serde_json::json!({ "ok": ok, "port": http_port }))
+    // Check the tunnel as well as the local port. Checking only the local
+    // port reported "connected" even when the remote server was unreachable.
+    let health = crate::health::check_trojan_health(http_port, trojan_config.as_ref()).await;
+
+    Ok(serde_json::json!({
+        "ok": health.all_healthy,
+        "port": http_port,
+        "httpPort": http_port,
+        "httpProxyOk": health.http_proxy_ok,
+        "tunnelOk": health.tunnel_ok,
+    }))
 }
 
 #[tauri::command]
@@ -751,6 +761,8 @@ fn start_health_monitor(
                 let _ = app_handle.emit("health:check", serde_json::json!({
                     "ok": true,
                     "httpPort": http_port,
+                    "httpProxyOk": true,
+                    "tunnelOk": true,
                 }));
             } else {
                 consecutive_failures += 1;
@@ -764,6 +776,7 @@ fn start_health_monitor(
                 let _ = app_handle.emit("health:check", serde_json::json!({
                     "ok": false,
                     "httpPort": http_port,
+                    "httpProxyOk": health.http_proxy_ok,
                     "tunnelOk": health.tunnel_ok,
                     "consecutiveFailures": consecutive_failures,
                 }));
