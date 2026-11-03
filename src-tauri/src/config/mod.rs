@@ -30,6 +30,10 @@ pub struct State {
     pub trojan_config: Option<TrojanConfig>,
     #[serde(default)]
     pub cached_domains: Vec<String>,
+    /// User-managed exclusions. These always route DIRECT, even when the
+    /// host also appears in `cached_domains`.
+    #[serde(default)]
+    pub bypass_domains: Vec<String>,
     #[serde(default)]
     pub last_fetch: Option<i64>,
     #[serde(default)]
@@ -67,6 +71,7 @@ impl Default for State {
             trojan_url: String::new(),
             trojan_config: None,
             cached_domains: Vec::new(),
+            bypass_domains: Vec::new(),
             last_fetch: None,
             using_fallback: false,
             using_cache: false,

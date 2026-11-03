@@ -14,6 +14,7 @@ pub async fn enable_proxy(
     let http_port = config.get().http_proxy_port;
     let presets = config.get().enabled_presets.clone();
     let cached = config.get().cached_domains.clone();
+    let bypass_domains = config.get().bypass_domains.clone();
     let proxy_consent = config.get().proxy_consent;
     let block_quic = config.get().block_quic;
     drop(config);
@@ -49,13 +50,14 @@ pub async fn enable_proxy(
     {
         let mut proxy = state.proxy.write().await;
         if proxy.is_none() {
-            let router = proxy::router::DomainRouter::new(domains.clone());
+            let router = proxy::router::DomainRouter::new(domains.clone(), bypass_domains.clone());
             let shared_config = state.trojan.read().await.shared_config();
             let server = proxy::server::ProxyServer::new(http_port, router, shared_config);
             *proxy = Some(server);
         }
         if let Some(s) = proxy.as_mut() {
             s.set_domains(domains.clone()).await;
+            s.set_bypass_domains(bypass_domains).await;
             s.start().await.map_err(|e| e.to_string())?;
         }
     }
@@ -210,6 +212,7 @@ pub async fn get_status(
     Ok(serde_json::json!({
         "enabled": s.enabled,
         "domainCount": s.cached_domains.len(),
+        "bypassCount": s.bypass_domains.len(),
         "domains": s.cached_domains,
         "proxyPort": s.proxy_port,
         "httpProxyPort": s.http_proxy_port,
@@ -300,6 +303,110 @@ pub async fn set_state(
     let mut config = state.config.write().await;
     config.set_state(new_state).map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "success": true }))
+}
+
+// --- Bypass (exclusion) list -------------------------------------------------
+
+#[tauri::command]
+pub async fn get_bypass_domains(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+) -> Result<serde_json::Value, String> {
+    let config = state.config.read().await;
+    let domains = config.get().bypass_domains.clone();
+    Ok(serde_json::json!({
+        "domains": domains,
+        "count": domains.len(),
+    }))
+}
+
+#[tauri::command]
+pub async fn add_bypass_domain(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    domain: String,
+) -> Result<serde_json::Value, String> {
+    let normalized = domains::normalize::normalize_domain(&domain)
+        .ok_or_else(|| format!("Invalid domain: {}", domain.trim()))?;
+
+    let (list, already_present) = {
+        let mut config = state.config.write().await;
+        let already_present = {
+            let list = &mut config.get_mut().bypass_domains;
+            let already_present = list.iter().any(|d| d == &normalized);
+            if !already_present {
+                list.push(normalized.clone());
+                list.sort();
+            }
+            already_present
+        };
+        config.save().map_err(|e| e.to_string())?;
+        (config.get().bypass_domains.clone(), already_present)
+    };
+
+    sync_bypass_routes(state.inner(), &list).await;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "domain": normalized,
+        "alreadyPresent": already_present,
+        "domains": list,
+    }))
+}
+
+#[tauri::command]
+pub async fn remove_bypass_domain(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    domain: String,
+) -> Result<serde_json::Value, String> {
+    let normalized = domains::normalize::normalize_domain(&domain)
+        .ok_or_else(|| format!("Invalid domain: {}", domain.trim()))?;
+
+    let list = {
+        let mut config = state.config.write().await;
+        {
+            let list = &mut config.get_mut().bypass_domains;
+            list.retain(|d| d != &normalized);
+        }
+        config.save().map_err(|e| e.to_string())?;
+        config.get().bypass_domains.clone()
+    };
+
+    sync_bypass_routes(state.inner(), &list).await;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "domain": normalized,
+        "domains": list,
+    }))
+}
+
+#[tauri::command]
+pub async fn set_bypass_domains(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    domains: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let mut normalized = Vec::with_capacity(domains.len());
+    for entry in domains {
+        let entry = domains::normalize::normalize_domain(&entry)
+            .ok_or_else(|| format!("Invalid domain: {}", entry.trim()))?;
+        if !normalized.contains(&entry) {
+            normalized.push(entry);
+        }
+    }
+    normalized.sort();
+
+    {
+        let mut config = state.config.write().await;
+        config.get_mut().bypass_domains = normalized.clone();
+        config.save().map_err(|e| e.to_string())?;
+    }
+
+    sync_bypass_routes(state.inner(), &normalized).await;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "domains": normalized,
+        "count": normalized.len(),
+    }))
 }
 
 /// Activate the in-process tunnel with the saved credentials. Kept as a
@@ -569,6 +676,15 @@ pub async fn quit_and_cleanup(state: std::sync::Arc<AppState>) -> Result<(), Str
 }
 
 // --- Helper functions ---
+
+/// Push the latest bypass list into the live router. No-op when the proxy is
+/// off — the list is read from state when it next starts.
+async fn sync_bypass_routes(state: &std::sync::Arc<AppState>, domains: &[String]) {
+    let proxy = state.proxy.read().await;
+    if let Some(server) = proxy.as_ref() {
+        server.set_bypass_domains(domains.to_vec()).await;
+    }
+}
 
 fn write_sentinel() -> std::io::Result<()> {
     let path = config::Store::config_dir().join("proxy.sentinel");

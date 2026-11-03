@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use crate::domains::fallback::DOMAINS_URLS;
+use crate::domains::normalize::valid_domain_shape;
 
 /// Shape pins: a domain list that deviates from these is treated as a
 /// compromised endpoint, not as data. A remote list may only ever influence
@@ -9,35 +10,6 @@ use crate::domains::fallback::DOMAINS_URLS;
 /// enable features, and no other state is written from fetch results.
 const MAX_LIST_BYTES: usize = 512 * 1024;
 const MAX_DOMAINS: usize = 20_000;
-const MAX_DOMAIN_LEN: usize = 253;
-
-/// A strictly valid lowercase domain: dot-separated labels of a-z, 0-9,
-/// hyphen; labels do not start or end with a hyphen and are ≤ 63 chars.
-fn valid_domain_shape(s: &str) -> bool {
-    if s.is_empty() || s.len() > MAX_DOMAIN_LEN {
-        return false;
-    }
-    if !s
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-')
-    {
-        return false;
-    }
-    for label in s.split('.') {
-        if label.is_empty() || label.len() > 63 {
-            return false;
-        }
-        if label.starts_with('-') || label.ends_with('-') {
-            return false;
-        }
-    }
-    // The last label (TLD) must be alphabetic — "1.2.3.4" and friends are
-    // not routable domain names.
-    match s.rsplit_once('.') {
-        Some((_, tld)) => tld.chars().all(|c| c.is_ascii_lowercase()),
-        None => false,
-    }
-}
 
 pub async fn fetch_domains() -> Result<Vec<String>, String> {
     let client = reqwest::Client::builder()

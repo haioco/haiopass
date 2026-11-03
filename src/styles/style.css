@@ -209,6 +209,37 @@ header { display: flex; align-items: center; justify-content: space-between; }
 .port-row input[type="number"]::-webkit-inner-spin-button,
 .port-row input[type="number"]::-webkit-outer-spin-button { opacity: 0.4; }
 
+/* Bypass list */
+.bypass-card { padding: 12px 14px; }
+.bypass-desc { font-size: 11px; color: #64748b; line-height: 1.55; margin: 0 0 10px; }
+.bypass-count {
+  font-size: 10px; font-weight: 700; color: #7c3aed;
+  background: rgba(124,58,237,0.08); border: 1px solid rgba(124,58,237,0.2);
+  padding: 2px 8px; border-radius: 10px;
+}
+.bypass-add { display: flex; gap: 6px; }
+.bypass-input {
+  flex: 1; min-width: 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 6px 10px; font-size: 12px; color: #1e293b; outline: none;
+  transition: border-color 0.2s, background 0.2s;
+}
+.bypass-input:focus { border-color: #667eea; background: #fff; }
+.bypass-input.bad { border-color: #dc2626; }
+.bypass-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.bypass-empty { font-size: 11px; color: #94a3b8; font-style: italic; }
+.bypass-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #f5f3ff; border: 1px solid #ddd6fe; color: #6d28d9;
+  border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 11px; font-weight: 600;
+  direction: ltr;
+}
+.bypass-chip button {
+  background: transparent; border: none; color: #8b5cf6; cursor: pointer;
+  width: 18px; height: 18px; border-radius: 50%; font-size: 13px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.bypass-chip button:hover { background: rgba(124,58,237,0.15); color: #5b21b6; }
+
 /* Settings */
 .btn-settings {
   background: #f1f5f9; border: 1px solid #e2e8f0; color: #64748b; padding: 8px;
