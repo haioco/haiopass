@@ -11,6 +11,9 @@ use crate::config::TrojanConfig;
 use crate::trojan::manager::SharedTrojanConfig;
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+/// Larger than tokio's 8 KiB default: the tunnel carries TLS records and
+/// media, where a bigger buffer cuts syscalls and wake-ups noticeably.
+const STREAM_BUFFER_SIZE: usize = 32 * 1024;
 
 pub struct ProxyServer {
     handle: Option<tokio::task::JoinHandle<()>>,
@@ -19,6 +22,7 @@ pub struct ProxyServer {
     trojan_config: SharedTrojanConfig,
     running: Arc<RwLock<bool>>,
     notify: Arc<Notify>,
+    pac_cache: Arc<RwLock<Option<String>>>,
 }
 
 impl ProxyServer {
@@ -30,15 +34,22 @@ impl ProxyServer {
             trojan_config,
             running: Arc::new(RwLock::new(false)),
             notify: Arc::new(Notify::new()),
+            pac_cache: Arc::new(RwLock::new(None)),
         }
     }
 
     pub async fn set_domains(&self, domains: Vec<String>) {
         self.router.set_domains(domains);
+        self.invalidate_pac().await;
     }
 
     pub async fn set_bypass_domains(&self, domains: Vec<String>) {
         self.router.set_bypass_domains(domains);
+        self.invalidate_pac().await;
+    }
+
+    async fn invalidate_pac(&self) {
+        *self.pac_cache.write().await = None;
     }
 
     pub async fn start(&mut self) -> crate::error::Result<()> {
@@ -58,6 +69,7 @@ impl ProxyServer {
         let running = self.running.clone();
         let port = self.port;
         let notify = self.notify.clone();
+        let pac_cache = self.pac_cache.clone();
 
         let handle = tokio::spawn(async move {
             tracing::info!("HTTP proxy listening on {}", addr);
@@ -69,9 +81,17 @@ impl ProxyServer {
                     result = listener.accept() => {
                         match result {
                             Ok((stream, _)) => {
+                                let _ = stream.set_nodelay(true);
                                 let router = router.clone();
                                 let trojan_config = trojan_config.clone();
-                                tokio::spawn(handle_connection(stream, router, trojan_config, port));
+                                let pac_cache = pac_cache.clone();
+                                tokio::spawn(handle_connection(
+                                    stream,
+                                    router,
+                                    trojan_config,
+                                    port,
+                                    pac_cache,
+                                ));
                             }
                             Err(e) => {
                                 if !*running.read().await {
@@ -137,6 +157,7 @@ async fn handle_connection(
     router: Arc<DomainRouter>,
     trojan_config: SharedTrojanConfig,
     pac_port: u16,
+    pac_cache: Arc<RwLock<Option<String>>>,
 ) {
     // Read the request line and all headers with a timeout.
     let (head, stream) =
@@ -162,9 +183,21 @@ async fn handle_connection(
 
     // Handle PAC request
     if method == "GET" && (target == "/pac.js" || target.starts_with("/pac.js?")) {
-        let domains = router.get_domains();
-        let bypass = router.get_bypass_domains();
-        let pac_script = pac::build_pac_script(&domains, &bypass, pac_port);
+        // Building the PAC embeds every routed domain, so cache it until the
+        // lists change. The OS may fetch this file repeatedly.
+        let pac_script = {
+            let mut cache = pac_cache.write().await;
+            match cache.as_ref() {
+                Some(script) => script.clone(),
+                None => {
+                    let domains = router.get_domains();
+                    let bypass = router.get_bypass_domains();
+                    let script = pac::build_pac_script(&domains, &bypass, pac_port);
+                    *cache = Some(script.clone());
+                    script
+                }
+            }
+        };
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/x-ns-proxy-autoconfig\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{}",
             pac_script.len(),
@@ -318,7 +351,12 @@ where
 {
     let result = tokio::time::timeout(
         IDLE_TIMEOUT,
-        tokio::io::copy_bidirectional(&mut stream, &mut remote),
+        tokio::io::copy_bidirectional_with_sizes(
+            &mut stream,
+            &mut remote,
+            STREAM_BUFFER_SIZE,
+            STREAM_BUFFER_SIZE,
+        ),
     )
     .await;
 
