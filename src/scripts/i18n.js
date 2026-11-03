@@ -42,6 +42,13 @@ export const translations = {
     consentBody: 'برای عبور از فیلتر، هایوبایپس باید پروکسی سیستم را تنظیم کند. این کار تنظیمات پروکسی سیستم\u200cعامل شما را تغییر می\u200cدهد (ویندوز: رجیستری/PAC، لینوکس: تنظیمات پروکسی گنوم، مک: پیکربندی شبکه). همه چیز هنگام قطع اتصال بازگردانی می\u200cشود.',
     consentDeny: 'فعلاً نه',
     consentAllow: 'اجازه می\u200cدهم',
+    bypassTitle: 'لیست عبور مستقیم',
+    bypassHint: 'این دامنه\u200cها و همه\u200cی زیردامنه\u200cهایشان مستقیم می\u200cروند، حتی اگر در لیست پروکسی باشند.',
+    bypassPlaceholder: 'مثلاً example.com',
+    bypassAdd: 'افزودن',
+    bypassEmpty: 'هنوز دامنه\u200cای اضافه نشده است',
+    bypassRemove: 'حذف',
+    bypassInvalid: 'دامنه معتبر نیست',
   },
   en: {
     appName: 'HaioBypass',
@@ -86,5 +93,12 @@ export const translations = {
     consentBody: 'To route blocked services, HaioBypass needs to set the system proxy. This modifies your OS proxy settings (Windows: registry/PAC, Linux: GNOME proxy settings, macOS: network configuration). Everything is restored when you disconnect.',
     consentDeny: 'Not now',
     consentAllow: 'Allow',
+    bypassTitle: 'Bypass list',
+    bypassHint: 'These domains and all their subdomains go direct, even if they are on the proxied list.',
+    bypassPlaceholder: 'example.com',
+    bypassAdd: 'Add',
+    bypassEmpty: 'No bypassed domains yet',
+    bypassRemove: 'Remove',
+    bypassInvalid: 'Not a valid domain',
   }
 };

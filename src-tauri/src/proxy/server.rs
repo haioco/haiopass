@@ -34,7 +34,11 @@ impl ProxyServer {
     }
 
     pub async fn set_domains(&self, domains: Vec<String>) {
-        self.router.set_domains(domains).await;
+        self.router.set_domains(domains);
+    }
+
+    pub async fn set_bypass_domains(&self, domains: Vec<String>) {
+        self.router.set_bypass_domains(domains);
     }
 
     pub async fn start(&mut self) -> crate::error::Result<()> {
@@ -154,8 +158,9 @@ async fn handle_connection(
 
     // Handle PAC request
     if request_line.starts_with("GET /pac.js") {
-        let domains = router.get_domains().await;
-        let pac_script = pac::build_pac_script(&domains, pac_port);
+        let domains = router.get_domains();
+        let bypass = router.get_bypass_domains();
+        let pac_script = pac::build_pac_script(&domains, &bypass, pac_port);
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/x-ns-proxy-autoconfig\r\nContent-Length: {}\r\n\r\n{}",
             pac_script.len(),
@@ -180,7 +185,7 @@ async fn handle_connection(
 
         let mut stream = stream;
 
-        if router.should_proxy(host).await {
+        if router.should_proxy(host) {
             match dial_trojan(&trojan_config, host, port).await {
                 Ok(mut remote) => {
                     let _ = stream.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await;
@@ -262,7 +267,7 @@ async fn handle_connection(
 
             let mut stream = stream;
 
-            if router.should_proxy(host).await {
+            if router.should_proxy(host) {
                 match dial_trojan(&trojan_config, host, port).await {
                     Ok(mut remote) => {
                         let _ = remote.write_all(origin_line.as_bytes()).await;

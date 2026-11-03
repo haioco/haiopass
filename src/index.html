@@ -71,6 +71,29 @@
         <button class="btn-refresh" id="btnRefreshDomains" data-i18n="refreshDomains">Refresh domains</button>
       </div>
 
+      <!-- Bypass / exclusion list -->
+      <div class="card bypass-card">
+        <div class="card-header">
+          <span class="card-label" data-i18n="bypassTitle">Bypass list</span>
+          <span class="bypass-count" id="bypassCount"></span>
+        </div>
+        <p class="bypass-desc" data-i18n="bypassHint">
+          These domains and all their subdomains go direct, even if they are on the proxied list.
+        </p>
+        <div class="bypass-add">
+          <input
+            type="text"
+            id="bypassInput"
+            class="bypass-input"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="example.com"
+            data-i18n-placeholder="bypassPlaceholder" />
+          <button class="btn-save" id="btnAddBypass" data-i18n="bypassAdd">Add</button>
+        </div>
+        <div class="bypass-list" id="bypassList"></div>
+      </div>
+
       <!-- Cloud engine setup -->
       <div class="card setup-card" id="setupCard">
         <div class="card-header">

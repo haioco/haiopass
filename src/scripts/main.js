@@ -27,11 +27,16 @@ const appVersion     = document.getElementById('appVersion');
 const updateBanner   = document.getElementById('updateBanner');
 const updateText     = document.getElementById('updateText');
 const btnInstallUpdate = document.getElementById('btnInstallUpdate');
+const bypassInput    = document.getElementById('bypassInput');
+const bypassList     = document.getElementById('bypassList');
+const bypassCount    = document.getElementById('bypassCount');
+const btnAddBypass   = document.getElementById('btnAddBypass');
 
 let currentLang = 'en';
 let lastRefreshTime = 0;
 let domainSourceUrl = '';
 let pendingUpdate = null;
+let bypassDomains = [];
 
 function setLanguage(lang) {
   currentLang = lang;
@@ -51,6 +56,7 @@ function setLanguage(lang) {
   });
 
   if (pendingUpdate) renderUpdateBanner();
+  renderBypassDomains(bypassDomains);
 
   if (toggle.checked) {
     toggleTitle.textContent = t.proxyActive;
@@ -373,6 +379,84 @@ btnSetup.addEventListener('click', async () => {
   }
 });
 
+// --- Bypass list ---
+
+function renderBypassDomains(domains) {
+  if (!bypassList) return;
+  bypassDomains = domains;
+  const t = translations[currentLang];
+  bypassCount.textContent = domains.length ? String(domains.length) : '';
+  bypassList.innerHTML = '';
+
+  if (!domains.length) {
+    const empty = document.createElement('span');
+    empty.className = 'bypass-empty';
+    empty.textContent = t.bypassEmpty;
+    bypassList.appendChild(empty);
+    return;
+  }
+
+  for (const domain of domains) {
+    const chip = document.createElement('span');
+    chip.className = 'bypass-chip';
+
+    const label = document.createElement('span');
+    label.textContent = domain;
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '\u00d7';
+    remove.title = t.bypassRemove;
+    remove.setAttribute('aria-label', `${t.bypassRemove}: ${domain}`);
+    remove.addEventListener('click', () => removeBypassDomain(domain));
+
+    chip.append(label, remove);
+    bypassList.appendChild(chip);
+  }
+}
+
+async function loadBypassDomains() {
+  try {
+    const res = await invoke('get_bypass_domains');
+    renderBypassDomains(res.domains || []);
+  } catch (e) {
+    // Non-fatal: the bypass card simply stays empty.
+  }
+}
+
+async function addBypassDomain() {
+  const value = bypassInput.value.trim();
+  if (!value) return;
+  try {
+    const res = await invoke('add_bypass_domain', { domain: value });
+    bypassInput.value = '';
+    bypassInput.classList.remove('bad');
+    showError(null);
+    renderBypassDomains(res.domains || []);
+  } catch (e) {
+    bypassInput.classList.add('bad');
+    showError(translations[currentLang].bypassInvalid);
+  }
+}
+
+async function removeBypassDomain(domain) {
+  try {
+    const res = await invoke('remove_bypass_domain', { domain });
+    showError(null);
+    renderBypassDomains(res.domains || []);
+  } catch (e) {
+    showError(String(e) || 'Remove failed');
+  }
+}
+
+btnAddBypass.addEventListener('click', addBypassDomain);
+bypassInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    addBypassDomain();
+  }
+});
+
 const btnRefreshDomains = document.getElementById('btnRefreshDomains');
 if (btnRefreshDomains) {
   btnRefreshDomains.addEventListener('click', async () => {
@@ -449,4 +533,5 @@ document.getElementById('btnBack').addEventListener('click', () => {
 setLanguage('en');
 loadConfig();
 loadStatus();
+loadBypassDomains();
 checkForUpdates();
