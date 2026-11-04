@@ -49,8 +49,42 @@ const quickBypassCount = $('quickBypassCount');
 const btnAddBypass = $('btnAddBypass');
 const btnRefreshDomains = $('btnRefreshDomains');
 const btnDeleteConfig = $('btnDeleteConfig');
+const googlePreset = $('googlePreset');
+const googlePresetAction = $('googlePresetAction');
 
 const LANG_KEY = 'haiobypass:lang';
+
+// Curated Google web domains that are safe to route directly. AI and Cloud
+// endpoints (gemini.google.com, aistudio.google.com, generativelanguage...)
+// stay on the tunnel so anti-sanction services keep working.
+const GOOGLE_PRESET_DOMAINS = Object.freeze([
+  'accounts.google.com',
+  'apis.google.com',
+  'books.google.com',
+  'calendar.google.com',
+  'docs.google.com',
+  'doubleclickbygoogle.com',
+  'drive.google.com',
+  'earth.google.com',
+  'fonts.googleapis.com',
+  'google-analytics.com',
+  'googleadservices.com',
+  'googlesyndication.com',
+  'googleusercontent.com',
+  'googletagmanager.com',
+  'gstatic.com',
+  'keep.google.com',
+  'mail.google.com',
+  'maps.google.com',
+  'news.google.com',
+  'photos.google.com',
+  'play.google.com',
+  'scholar.google.com',
+  'sheets.google.com',
+  'slides.google.com',
+  'translate.google.com',
+  'www.google.com',
+]);
 const VALID_TABS = ['home', 'bypass', 'settings'];
 const CONN_KEY = {
   off: 'proxyOff',
@@ -652,6 +686,24 @@ btnSetup.addEventListener('click', async () => {
 /* Bypass list                                                         */
 /* ------------------------------------------------------------------ */
 
+function missingPresetDomains(preset) {
+  const current = new Set(bypassDomains);
+  return preset.filter((domain) => !current.has(domain));
+}
+
+function updateGooglePreset() {
+  if (!googlePreset || !googlePresetAction) return;
+
+  const t = translations[currentLang];
+  const missing = missingPresetDomains(GOOGLE_PRESET_DOMAINS);
+  const allAdded = missing.length === 0;
+
+  googlePreset.disabled = allAdded;
+  googlePresetAction.textContent = allAdded
+    ? t.bypassPresetAdded
+    : t.bypassPresetAdd.replace('{n}', String(missing.length));
+}
+
 function bypassEmptyState(message, hint) {
   const empty = document.createElement('div');
   empty.className = 'bypass-empty';
@@ -713,6 +765,8 @@ function renderBypassDomains(domains) {
   quickBypassCount.textContent = bypassDomains.length
     ? t.bypassCountLabel.replace('{n}', String(bypassDomains.length))
     : t.bypassNone;
+
+  updateGooglePreset();
 
   const query = (bypassSearch?.value || '').trim().toLowerCase();
   const filtered = query
@@ -797,6 +851,28 @@ bypassForm.addEventListener('submit', (event) => {
 
 bypassSearch.addEventListener('input', () => {
   renderBypassDomains(bypassDomains);
+});
+
+googlePreset.addEventListener('click', async () => {
+  const t = translations[currentLang];
+  const missing = missingPresetDomains(GOOGLE_PRESET_DOMAINS);
+  if (missing.length === 0) return;
+
+  googlePreset.disabled = true;
+  try {
+    const merged = [...new Set([...bypassDomains, ...missing])].sort();
+    const res = await invoke('set_bypass_domains', { domains: merged });
+    showError(null);
+    if (Array.isArray(res?.domains)) {
+      renderBypassDomains(res.domains);
+    } else {
+      await loadBypassDomains();
+    }
+  } catch (error) {
+    showError(String(error) || t.bypassPresetFailed);
+  } finally {
+    updateGooglePreset();
+  }
 });
 
 /* ------------------------------------------------------------------ */
