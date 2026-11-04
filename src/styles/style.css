@@ -994,6 +994,91 @@ a {
   text-align: center;
 }
 
+.preset-card {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--brand-ring);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 0% 0%, var(--brand-soft), transparent 62%),
+    var(--surface);
+  color: var(--text);
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s;
+}
+
+.preset-card:hover:not(:disabled) {
+  border-color: var(--brand);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.preset-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
+
+.preset-card:disabled {
+  cursor: default;
+  opacity: 0.78;
+}
+
+.preset-logo {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--brand-ring);
+  background: var(--surface);
+  color: var(--brand);
+  font-size: 16px;
+  font-weight: 900;
+  font-family: var(--mono);
+}
+
+.preset-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.preset-copy strong {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.preset-copy small {
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.preset-action {
+  flex-shrink: 0;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--brand-ring);
+  background: var(--surface);
+  color: var(--brand);
+  font-size: 10.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.preset-card:disabled .preset-action {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+  background: var(--success-soft);
+}
+
 .add-row {
   display: flex;
   gap: 8px;
