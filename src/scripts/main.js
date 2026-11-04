@@ -21,6 +21,7 @@ const portInput = $('portInput');
 const errorMsg = $('errorMsg');
 const errorText = $('errorText');
 const errorClose = $('errorClose');
+const consentModal = $('consentModal');
 const overlay = $('overlay');
 const overlayMsg = $('overlayMsg');
 const connStatus = $('connStatus');
@@ -106,6 +107,7 @@ let connState = 'off';
 let deleteTimer = null;
 let toastTimer = null;
 let trojanRunning = false;
+let needsProxyConsent = false;
 let currentTab = 'home';
 
 /* ------------------------------------------------------------------ */
@@ -342,10 +344,15 @@ function domainCountText(data) {
 function applyStatusLabels(data, skipHealth = false) {
   const t = translations[currentLang];
   const enabled = Boolean(data.enabled);
+  needsProxyConsent = enabled && data.proxyConsent === false;
   toggle.checked = enabled;
   statusBadge.textContent = enabled ? 'ON' : 'OFF';
   statusBadge.classList.toggle('on', enabled);
-  toggleTitle.textContent = enabled ? t.proxyActive : t.proxyDisabled;
+  toggleTitle.textContent = needsProxyConsent
+    ? t.consentNeeded
+    : enabled
+      ? t.proxyActive
+      : t.proxyDisabled;
   domainCount.textContent = domainCountText(data);
   statDomains.textContent = data.domainCount
     ? Number(data.domainCount).toLocaleString()
@@ -363,7 +370,12 @@ function applyStatusLabels(data, skipHealth = false) {
       : t.updateUpToDate;
   }
 
-  if (enabled) {
+  if (needsProxyConsent) {
+    // The tunnel may be running, but without OS-proxy consent browser
+    // traffic never reaches it. Do not report a false "Connected" state.
+    setConn('failed', t.consentNeeded);
+    consentModal?.classList.remove('hidden');
+  } else if (enabled) {
     if (!skipHealth) runHealthCheck();
   } else {
     setConn('off', t.proxyOff);
@@ -975,7 +987,7 @@ listen('trojan:status', (data) => {
 });
 
 listen('health:check', (data) => {
-  if (!toggle.checked) return;
+  if (!toggle.checked || needsProxyConsent) return;
   const t = translations[currentLang];
   if (data.ok) {
     setConn('connected', t.connected);
@@ -993,7 +1005,7 @@ listen('domains:updated', () => {
 });
 
 listen('health:failed', () => {
-  if (!toggle.checked) return;
+  if (!toggle.checked || needsProxyConsent) return;
   const t = translations[currentLang];
   setConn('failed', t.failed);
   showError(t.healthFailed);

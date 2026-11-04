@@ -114,6 +114,7 @@ export const translations = {
     updateRestart: 'بروزرسانی تمام شد. اگر برنامه باز نشد، دستی بازش کنید.',
     updateFailed: 'بروزرسانی ناموفق بود',
 
+    consentNeeded: 'برای اتصال، اجازه تنظیم پروکسی سیستم لازم است',
     consentTitle: 'اجازه تغییر پروکسی سیستم؟',
     consentBody: 'برای عبور از فیلتر، هایوبایپس باید پروکسی سیستم را تنظیم کند. این کار تنظیمات پروکسی سیستم‌عامل شما را تغییر می‌دهد (ویندوز: رجیستری/PAC، لینوکس: تنظیمات پروکسی گنوم، مک: پیکربندی شبکه). همه چیز هنگام قطع اتصال بازگردانی می‌شود.',
     consentDeny: 'فعلاً نه',
@@ -239,6 +240,7 @@ export const translations = {
     updateRestart: 'Update finished. Restart the app if it did not reopen.',
     updateFailed: 'Update failed',
 
+    consentNeeded: 'System proxy permission is required to connect',
     consentTitle: 'Allow system proxy change?',
     consentBody: 'To route blocked services, HaioBypass needs to set the system proxy. This modifies your OS proxy settings (Windows: registry/PAC, Linux: GNOME proxy settings, macOS: network configuration). Everything is restored when you disconnect.',
     consentDeny: 'Not now',

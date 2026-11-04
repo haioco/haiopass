@@ -160,7 +160,14 @@ if (consentModal) {
     }
   });
 
-  document.getElementById('consentDeny').addEventListener('click', () => {
+  document.getElementById('consentDeny').addEventListener('click', async () => {
     consentModal.classList.add('hidden');
+    try {
+      // Without OS-proxy consent the tunnel cannot carry browser traffic;
+      // leave the app in a truthful OFF state instead of a false "Connected".
+      await invoke('disable_proxy');
+    } catch (error) {
+      reportError(String(error) || t().unknownError);
+    }
   });
 }
