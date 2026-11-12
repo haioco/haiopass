@@ -20,6 +20,8 @@ use tauri::Emitter;
 pub struct AppState {
     pub config: Arc<RwLock<config::Store>>,
     pub proxy: Arc<RwLock<Option<proxy::server::ProxyServer>>>,
+    /// Loopback SOCKS5 listener used for UDP-capable applications.
+    pub socks5: Arc<RwLock<Option<proxy::socks5::Socks5Server>>>,
     pub trojan: Arc<RwLock<trojan::manager::TrojanManager>>,
     pub domains: Arc<RwLock<domains::store::DomainStore>>,
     pub os_proxy: Arc<RwLock<osproxy::OsProxy>>,
@@ -96,6 +98,7 @@ pub fn run() {
     let state = Arc::new(AppState {
         config: Arc::new(RwLock::new(config)),
         proxy: Arc::new(RwLock::new(None)),
+        socks5: Arc::new(RwLock::new(None)),
         trojan: Arc::new(RwLock::new(trojan::manager::TrojanManager::new())),
         domains: Arc::new(RwLock::new(domains::store::DomainStore::new())),
         os_proxy: Arc::new(RwLock::new(osproxy::OsProxy::new())),
