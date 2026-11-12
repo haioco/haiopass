@@ -302,6 +302,8 @@ async fn run_udp_association(mut control: TcpStream, config: &SharedTrojanConfig
     let mut client_udp: Option<SocketAddr> = None;
     let mut datagram = vec![0u8; 65535];
     let mut pending: Vec<u8> = Vec::with_capacity(BUFFER_SIZE);
+    let mut pending_pos = 0usize;
+    let mut reply = Vec::with_capacity(4 + 16 + 2 + MAX_DATAGRAM);
     let mut chunk = vec![0u8; BUFFER_SIZE];
 
     let idle = tokio::time::sleep(IDLE_TIMEOUT);
@@ -351,15 +353,20 @@ async fn run_udp_association(mut control: TcpStream, config: &SharedTrojanConfig
                 if pending.len() > 4 * MAX_DATAGRAM {
                     return Err(HaioError::Proxy("UDP frame buffer overflow".into()));
                 }
-                while let Some((frame, consumed)) = udp::decode_frame(&pending) {
+                while let Some((frame, consumed)) = udp::decode_frame(&pending[pending_pos..]) {
                     if let Some(client_addr) = client_udp {
-                        udp.send_to(
-                            &udp::encode_socks5_udp(frame.address, &frame.payload),
-                            client_addr,
-                        )
-                        .await?;
+                        // Reuse one reply buffer: a datagram-per-allocation
+                        // reply path dominated CPU on DNS-heavy workloads.
+                        udp::encode_socks5_udp_into(&mut reply, frame.address, &frame.payload);
+                        udp.send_to(&reply, client_addr).await?;
                     }
-                    pending.drain(..consumed);
+                    pending_pos += consumed;
+                }
+                if pending_pos > 0 {
+                    // Drop consumed frames once per read instead of shifting
+                    // the tail for every frame (O(n^2) on bursts).
+                    pending.drain(..pending_pos);
+                    pending_pos = 0;
                 }
             }
         }

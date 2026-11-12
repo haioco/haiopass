@@ -164,11 +164,16 @@ fn decode_socks_address(buf: &[u8]) -> Option<(SocksAddress, usize)> {
 }
 
 /// Build a SOCKS5 UDP reply datagram (`RSV(2) FRAG=0 ATYP ADDR PORT payload`).
+pub fn encode_socks5_udp_into(out: &mut Vec<u8>, address: SocketAddr, payload: &[u8]) {
+    out.clear();
+    out.extend_from_slice(&[0, 0, 0]);
+    push_ip_address(out, address.ip(), address.port());
+    out.extend_from_slice(payload);
+}
+
 pub fn encode_socks5_udp(address: SocketAddr, payload: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(4 + 16 + 2 + payload.len());
-    out.extend_from_slice(&[0, 0, 0]);
-    push_ip_address(&mut out, address.ip(), address.port());
-    out.extend_from_slice(payload);
+    encode_socks5_udp_into(&mut out, address, payload);
     out
 }
 
