@@ -62,6 +62,24 @@ pub async fn enable_proxy(
         }
     }
 
+    // 3b. Start the loopback SOCKS5 listener. Browsers use the PAC above, but
+    // PAC/system proxy settings cannot carry UDP; applications that speak
+    // SOCKS5 use this endpoint for both TCP and UDP.
+    {
+        let socks_port = {
+            let config = state.config.read().await;
+            config.get().proxy_port
+        };
+        let mut socks5 = state.socks5.write().await;
+        if socks5.is_none() {
+            let shared_config = state.trojan.read().await.shared_config();
+            *socks5 = Some(proxy::socks5::Socks5Server::new(socks_port, shared_config));
+        }
+        if let Some(s) = socks5.as_mut() {
+            s.start().await.map_err(|e| e.to_string())?;
+        }
+    }
+
     // 4. Apply OS proxy — only with the user's explicit one-time consent.
     //    The PAC/registry takeover is the system-intrusive part of the
     //    feature; without consent we stay a plain local proxy and ask the
@@ -170,6 +188,15 @@ pub async fn disable_proxy(
             s.stop().await.map_err(|e| e.to_string())?;
         }
         *proxy = None;
+    }
+
+    // Stop the SOCKS5 (TCP+UDP) listener
+    {
+        let mut socks5 = state.socks5.write().await;
+        if let Some(s) = socks5.as_mut() {
+            s.stop().await.map_err(|e| e.to_string())?;
+        }
+        *socks5 = None;
     }
 
     // Clear OS proxy

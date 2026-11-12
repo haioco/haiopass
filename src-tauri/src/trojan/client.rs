@@ -41,6 +41,8 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Trojan request command: CONNECT (tunnel a TCP stream).
 const CMD_CONNECT: u8 = 0x01;
+/// Trojan request command: UDP_ASSOCIATE (relay datagrams in framed packets).
+const CMD_UDP_ASSOCIATE: u8 = 0x03;
 /// SOCKS5 address type: 4-byte IPv4.
 const ATYP_IPV4: u8 = 0x01;
 /// SOCKS5 address type: 1-byte length + domain name.
@@ -131,9 +133,28 @@ fn push_address(out: &mut Vec<u8>, host: &str, port: u16) {
 /// Open a tunnelled connection to `host:port` through the Trojan server.
 ///
 /// Performs: TCP connect to the server → TLS handshake (SNI = `config.sni`,
-/// verified) → Trojan request → server status byte. On success the returned
-/// stream is a raw pipe to `host:port`.
+/// verified) → Trojan request. On success the returned stream is a raw pipe to
+/// `host:port`.
 pub async fn dial(config: &TrojanConfig, host: &str, port: u16) -> crate::error::Result<TrojanStream> {
+    open(config, CMD_CONNECT, host, port).await
+}
+
+/// Open a UDP relay session (`UDP_ASSOCIATE`).
+///
+/// The returned stream is not a pipe to a host: each direction carries
+/// length-prefixed, address-tagged datagrams (see `proxy::udp`). The server
+/// ignores the associate address, so `0.0.0.0:0` is used and the first frame
+/// names the real destination.
+pub async fn dial_udp(config: &TrojanConfig) -> crate::error::Result<TrojanStream> {
+    open(config, CMD_UDP_ASSOCIATE, "0.0.0.0", 0).await
+}
+
+async fn open(
+    config: &TrojanConfig,
+    command: u8,
+    host: &str,
+    port: u16,
+) -> crate::error::Result<TrojanStream> {
     let addr = format!("{}:{}", config.server, config.port);
     let tcp = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(&addr))
         .await
@@ -174,7 +195,7 @@ pub async fn dial(config: &TrojanConfig, host: &str, port: u16) -> crate::error:
     let mut request = Vec::with_capacity(56 + 2 + 1 + 1 + 1 + 256 + 2 + 2);
     request.extend_from_slice(password_hex(&config.password).as_bytes());
     request.extend_from_slice(b"\r\n");
-    request.push(CMD_CONNECT);
+    request.push(command);
     push_address(&mut request, host, port);
     request.extend_from_slice(b"\r\n");
 
@@ -184,7 +205,7 @@ pub async fn dial(config: &TrojanConfig, host: &str, port: u16) -> crate::error:
     // No server reply: the stream is a raw pipe from here. Do not read
     // anything — the next byte belongs to the tunnelled session.
 
-    tracing::debug!("Trojan tunnel established to {}:{}", host, port);
+    tracing::debug!("Trojan tunnel established to {}:{} (cmd {})", host, port, command);
     Ok(Box::new(tls))
 }
 
