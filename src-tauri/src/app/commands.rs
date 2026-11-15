@@ -258,6 +258,8 @@ pub async fn get_status(
         "domainSourceUrl": crate::domains::fallback::DOMAINS_URLS[0],
         "version": app_handle.package_info().version.to_string(),
         "lastUpdateAt": s.last_update_at,
+        "configSource": s.config_source,
+        "haiogateAccountId": s.haiogate_account_id,
     }))
 }
 
@@ -300,6 +302,9 @@ pub async fn save_config(
         port: parsed.port,
         sni: parsed.sni,
     });
+    // A manually pasted key always wins over a HaioGate-applied config.
+    config.get_mut().config_source = config::ConfigSource::Manual;
+    config.get_mut().haiogate_account_id = None;
     config.save().map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({
@@ -323,6 +328,8 @@ pub async fn delete_config(
     let mut config = state.config.write().await;
     config.get_mut().trojan_url = String::new();
     config.get_mut().trojan_config = None;
+    config.get_mut().config_source = config::ConfigSource::Manual;
+    config.get_mut().haiogate_account_id = None;
     config.save().map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({ "success": true }))
@@ -334,16 +341,6 @@ pub async fn get_state(
 ) -> Result<serde_json::Value, String> {
     let config = state.config.read().await;
     serde_json::to_value(config.get()).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn set_state(
-    state: tauri::State<'_, std::sync::Arc<AppState>>,
-    new_state: config::State,
-) -> Result<serde_json::Value, String> {
-    let mut config = state.config.write().await;
-    config.set_state(new_state).map_err(|e| e.to_string())?;
-    Ok(serde_json::json!({ "success": true }))
 }
 
 // --- Bypass (exclusion) list -------------------------------------------------

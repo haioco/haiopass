@@ -15,6 +15,19 @@ pub struct TrojanConfig {
     pub sni: String,
 }
 
+/// Where the currently applied VPN config came from.
+///
+/// `Manual` covers a pasted `haio://` / `trojan://` access key (including the
+/// guest path). `Haiogate` means the config was applied from a HaioGate account
+/// and `haiogate_account_id` identifies it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ConfigSource {
+    #[default]
+    Manual,
+    Haiogate,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct State {
@@ -54,6 +67,13 @@ pub struct State {
     pub minimize_to_tray: bool,
     #[serde(default)]
     pub last_update_at: Option<i64>,
+    /// Manual paste vs HaioGate-applied config. Defaults preserve existing
+    /// `state.json` files.
+    #[serde(default)]
+    pub config_source: ConfigSource,
+    /// HaioGate account id when `config_source == haiogate`.
+    #[serde(default)]
+    pub haiogate_account_id: Option<String>,
 }
 
 fn default_enabled() -> bool { false }
@@ -82,6 +102,8 @@ impl Default for State {
             autostart: false,
             minimize_to_tray: true,
             last_update_at: None,
+            config_source: ConfigSource::Manual,
+            haiogate_account_id: None,
         }
     }
 }
@@ -131,10 +153,18 @@ impl Store {
     }
 
     pub fn save(&mut self) -> crate::error::Result<()> {
-        let dir = self.path.parent().unwrap();
-        fs::create_dir_all(dir)?;
+        if let Some(dir) = self.path.parent() {
+            fs::create_dir_all(dir)?;
+        }
         let data = serde_json::to_string_pretty(&self.state)?;
         fs::write(&self.path, data)?;
+        // The file holds the VPN access key (and parsing metadata). Keep it
+        // owner-only; portal tokens never live here.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&self.path, fs::Permissions::from_mode(0o600));
+        }
         Ok(())
     }
 
@@ -145,9 +175,35 @@ impl Store {
     pub fn get_mut(&mut self) -> &mut State {
         &mut self.state
     }
+}
 
-    pub fn set_state(&mut self, new_state: State) -> crate::error::Result<()> {
-        self.state = new_state;
-        self.save()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_state_defaults_to_manual_source() {
+        let state: State = serde_json::from_str(r#"{"enabled":false}"#).unwrap();
+        assert_eq!(state.config_source, ConfigSource::Manual);
+        assert!(state.haiogate_account_id.is_none());
+    }
+
+    #[test]
+    fn source_round_trips_as_lowercase_camel_case() {
+        let state = State {
+            config_source: ConfigSource::Haiogate,
+            haiogate_account_id: Some("acc-1".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"configSource\":\"haiogate\""));
+        assert!(json.contains("\"haiogateAccountId\":\"acc-1\""));
+        let back: State = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.config_source, ConfigSource::Haiogate);
+    }
+
+    #[test]
+    fn default_source_is_manual() {
+        assert_eq!(ConfigSource::default(), ConfigSource::Manual);
     }
 }

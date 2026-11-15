@@ -11,6 +11,7 @@ pub mod tray;
 pub mod updater;
 pub mod error;
 pub mod webview_check;
+pub mod portal;
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -28,6 +29,9 @@ pub struct AppState {
     pub app_proxy: Arc<RwLock<appproxy::AppProxyRegistry>>,
     pub interval_handle: Arc<RwLock<Option<tauri::async_runtime::JoinHandle<()>>>>,
     pub health_handle: Arc<RwLock<Option<tauri::async_runtime::JoinHandle<()>>>>,
+    /// Portal (OTP / HaioGate / billing) client. Additive: if initialization
+    /// fails the VPN keeps working and the HaioGate tab shows a retry state.
+    pub portal: Arc<portal::PortalService>,
 }
 
 pub fn run() {
@@ -105,6 +109,7 @@ pub fn run() {
         app_proxy: Arc::new(RwLock::new(appproxy::AppProxyRegistry::new())),
         interval_handle: Arc::new(RwLock::new(None)),
         health_handle: Arc::new(RwLock::new(None)),
+        portal: Arc::new(portal::PortalService::new()),
     });
 
     let app_state = state.clone();
@@ -122,7 +127,6 @@ pub fn run() {
             app::commands::save_config,
             app::commands::delete_config,
             app::commands::get_state,
-            app::commands::set_state,
             app::commands::get_bypass_domains,
             app::commands::add_bypass_domain,
             app::commands::remove_bypass_domain,
@@ -140,6 +144,30 @@ pub fn run() {
             app::commands::check_for_updates,
             app::commands::install_update,
             app::commands::quit_and_restore,
+            portal::commands::portal_session,
+            portal::commands::portal_request_otp,
+            portal::commands::portal_login_otp,
+            portal::commands::portal_logout,
+            portal::commands::portal_me,
+            portal::commands::portal_shahkar_verify,
+            portal::commands::portal_list_packages,
+            portal::commands::portal_list_accounts,
+            portal::commands::portal_account_detail,
+            portal::commands::portal_sync_quota,
+            portal::commands::portal_start_buy,
+            portal::commands::portal_start_renew,
+            portal::commands::portal_buy_plan,
+            portal::commands::portal_invoice,
+            portal::commands::portal_invoice_pay,
+            portal::commands::portal_list_orgs,
+            portal::commands::portal_open_payment,
+            portal::commands::portal_reconcile_pending,
+            portal::commands::portal_pending_purchase,
+            portal::commands::portal_cancel_pending,
+            portal::commands::portal_apply_config,
+            portal::commands::portal_add_member,
+            portal::commands::portal_rotate_member,
+            portal::commands::portal_revoke_member,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
@@ -151,6 +179,7 @@ pub fn run() {
             });
 
             let enable_handle = app_handle.clone();
+            let portal_state = state.clone();
             tauri::async_runtime::spawn(async move {
                 let config = state.config.read().await;
                 let enabled = config.get().enabled;
@@ -177,6 +206,15 @@ pub fn run() {
                     Ok(None) => tracing::info!("App is up to date"),
                     Err(e) => tracing::warn!("Startup update check failed: {}", e),
                 }
+            });
+
+            // Restore the portal session in the background: read the keyring,
+            // validate /auth/me/, refresh once if needed, then tell the UI.
+            // Never blocks launch, the proxy, or the updater.
+            let portal_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let view = portal_state.portal.restore().await;
+                let _ = portal_handle.emit("portal:session", view);
             });
 
             Ok(())

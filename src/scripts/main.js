@@ -1,6 +1,7 @@
 import { invoke, listen } from './invoke.js';
 import { translations } from './i18n.js';
 import { initTheme, getThemeMode, getResolvedTheme, setThemeMode, toggleTheme } from './theme.js';
+import { initPortal, copyToClipboard } from './portal.js';
 import './settings.js';
 
 const $ = (id) => document.getElementById(id);
@@ -49,6 +50,10 @@ const bypassCount = $('bypassCount');
 const quickBypassCount = $('quickBypassCount');
 const btnAddBypass = $('btnAddBypass');
 const btnRefreshDomains = $('btnRefreshDomains');
+const btnCopyConfig = $('btnCopyConfig');
+const shareWarnModal = $('shareWarnModal');
+const shareWarnCopy = $('shareWarnCopy');
+const shareWarnCancel = $('shareWarnCancel');
 const btnDeleteConfig = $('btnDeleteConfig');
 const googlePreset = $('googlePreset');
 const googlePresetAction = $('googlePresetAction');
@@ -86,7 +91,7 @@ const GOOGLE_PRESET_DOMAINS = Object.freeze([
   'translate.google.com',
   'www.google.com',
 ]);
-const VALID_TABS = ['home', 'bypass', 'settings'];
+const VALID_TABS = ['home', 'haiogate', 'bypass', 'settings'];
 const CONN_KEY = {
   off: 'proxyOff',
   checking: 'checking',
@@ -109,6 +114,9 @@ let toastTimer = null;
 let trojanRunning = false;
 let needsProxyConsent = false;
 let currentTab = 'home';
+let configSource = 'manual';
+let haiogateAccountId = null;
+let copyWarnResolve = null;
 
 /* ------------------------------------------------------------------ */
 /* Language                                                            */
@@ -171,6 +179,7 @@ function setLanguage(lang) {
   }
   setConn(connState, t[CONN_KEY[connState] || 'proxyOff']);
   updateServerStat();
+  refreshHomeCard();
   window.dispatchEvent(new CustomEvent('app:language', { detail: currentLang }));
 }
 
@@ -231,7 +240,17 @@ function switchTab(name) {
       showError(String(error) || translations[currentLang].settingsLoadFailed);
     });
   }
+
+  if (currentTab === 'haiogate' && window.portalModule) {
+    window.portalModule.onTabEnter().catch(() => {
+      // The HaioGate panel renders its own retry state.
+    });
+  }
 }
+
+// The portal module navigates to the HaioGate tab from the header chip, the
+// onboarding card, and the buy banner.
+window.switchAppTab = switchTab;
 
 tabBar.addEventListener('click', (event) => {
   const button = event.target.closest('[data-tab]');
@@ -270,6 +289,18 @@ function showOnboarding() {
   showError(null);
 }
 
+// The HaioGate tab must be reachable before a config exists (new user buys a
+// package first, then applies it). This reveals the app shell without
+// pretending a config is saved.
+function enterPortalTab() {
+  configOnlyCard.classList.add('hidden');
+  dashboard.classList.remove('hidden');
+  tabBar.classList.remove('hidden');
+  switchTab('haiogate');
+}
+
+window.appEnterPortal = enterPortalTab;
+
 /* ------------------------------------------------------------------ */
 /* Shared UI helpers                                                   */
 /* ------------------------------------------------------------------ */
@@ -285,20 +316,38 @@ function setLoading(on, msg) {
 function showError(msg) {
   if (!msg) {
     errorMsg.classList.add('hidden');
+    errorMsg.classList.remove('ok');
     clearTimeout(toastTimer);
     return;
   }
 
+  errorMsg.classList.remove('ok');
   errorText.textContent = msg;
   errorMsg.classList.remove('hidden');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => errorMsg.classList.add('hidden'), 8000);
 }
 
+// Success / neutral notices share the toast, with a success accent.
+function showNotice(msg) {
+  if (!msg) return;
+  errorText.textContent = msg;
+  errorMsg.classList.add('ok');
+  errorMsg.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    errorMsg.classList.add('hidden');
+    errorMsg.classList.remove('ok');
+  }, 6000);
+}
+
 errorClose.addEventListener('click', () => showError(null));
 
-// Let feature modules (settings, etc.) surface errors in the same toast.
+// Let feature modules (settings, portal) surface errors in the same toast and
+// reuse the global overlay.
 window.showAppError = showError;
+window.showAppNotice = showNotice;
+window.appLoading = setLoading;
 
 function setConn(state, text) {
   connState = state;
@@ -332,11 +381,32 @@ function updateServerStat() {
     : '\u2014';
 }
 
+/* ------------------------------------------------------------------ */
+/* Home HaioGate summary & config source                              */
+/* ------------------------------------------------------------------ */
+
+function refreshHomeCard() {
+  if (window.portalModule?.homeCard) {
+    window.portalModule.homeCard(configSource, haiogateAccountId);
+  }
+}
+
+async function appConfigChanged(detail = {}) {
+  configSource = detail.source || 'manual';
+  haiogateAccountId = detail.accountId || null;
+  await loadConfig();
+  await loadStatus({ skipHealth: true });
+  refreshHomeCard();
+}
+
+window.appConfigChanged = appConfigChanged;
+window.appRefreshHomeCard = refreshHomeCard;
+window.appHasConfig = false;
+
 function domainCountText(data) {
   const t = translations[currentLang];
   if (!data || !data.domainCount) return '';
-  let suffix = t.domainsProxied;
-  if (data.usingFallback) suffix = t.domainsFallback;
+  let suffix = t.domainsProxied;  if (data.usingFallback) suffix = t.domainsFallback;
   else if (data.usingCache) suffix = t.domainsCached;
   return `${Number(data.domainCount).toLocaleString()} ${suffix}`;
 }
@@ -369,6 +439,10 @@ function applyStatusLabels(data, skipHealth = false) {
       ? `${t.lastFetch}: ${formatTimestamp(data.lastUpdateAt)}`
       : t.updateUpToDate;
   }
+
+  if (typeof data.configSource === 'string') configSource = data.configSource;
+  haiogateAccountId = data.haiogateAccountId || null;
+  refreshHomeCard();
 
   if (needsProxyConsent) {
     // The tunnel may be running, but without OS-proxy consent browser
@@ -463,29 +537,39 @@ async function loadConfig() {
     const state = await invoke('get_state');
     if (state.trojanUrl) {
       configInput.value = state.trojanUrl;
+      if (typeof state.configSource === 'string') configSource = state.configSource;
+      haiogateAccountId = state.haiogateAccountId || null;
       const parsed = parseAccessKey(state.trojanUrl);
       if (parsed) {
         parsedConfig = parsed;
+        window.appHasConfig = true;
         renderConfigStatus();
         updateServerStat();
         btnSetup.disabled = false;
         showDashboard();
+        window.portalModule?.refreshSession?.();
+        refreshHomeCard();
         return parsed;
       }
+      window.appHasConfig = false;
       parsedConfig = null;
       setConfigStatus(translations[currentLang].invalidConfig, false);
     } else {
+      window.appHasConfig = false;
       configInput.value = '';
       parsedConfig = null;
       setConfigStatus('', null);
     }
   } catch (error) {
     parsedConfig = null;
+    window.appHasConfig = false;
     setConfigStatus(String(error) || translations[currentLang].invalidConfig, false);
   }
 
   btnSetup.disabled = true;
   updateServerStat();
+  window.portalModule?.refreshSession?.();
+  refreshHomeCard();
   showOnboarding();
   return null;
 }
@@ -513,6 +597,9 @@ saveConfigBtn.addEventListener('click', async () => {
     }
 
     parsedConfig = parsed;
+    window.appHasConfig = true;
+    configSource = 'manual';
+    haiogateAccountId = null;
     renderConfigStatus();
     updateServerStat();
     btnSetup.disabled = false;
@@ -522,6 +609,7 @@ saveConfigBtn.addEventListener('click', async () => {
     }, 1800);
 
     showDashboard();
+    window.portalModule?.refreshSession?.();
     await loadStatus();
   } catch (error) {
     setConfigStatus(String(error) || t.saveFailed, false);
@@ -530,6 +618,58 @@ saveConfigBtn.addEventListener('click', async () => {
     saveConfigBtn.disabled = false;
   }
 });
+
+/* ------------------------------------------------------------------ */
+/* Copy connection link (guest + manual + HaioGate)                   */
+/* ------------------------------------------------------------------ */
+
+function resolveCopyWarning(allowed) {
+  shareWarnModal?.classList.add('hidden');
+  if (copyWarnResolve) {
+    const resolve = copyWarnResolve;
+    copyWarnResolve = null;
+    resolve(allowed);
+  }
+}
+
+function askShareWarning() {
+  return new Promise((resolve) => {
+    if (!shareWarnModal) {
+      resolve(true);
+      return;
+    }
+    copyWarnResolve = resolve;
+    shareWarnModal.classList.remove('hidden');
+  });
+}
+
+async function currentTrojanUrl() {
+  if (configInput.value && parseAccessKey(configInput.value)) {
+    return configInput.value.trim();
+  }
+  try {
+    const state = await invoke('get_state');
+    return typeof state.trojanUrl === 'string' ? state.trojanUrl : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+btnCopyConfig?.addEventListener('click', async () => {
+  const link = await currentTrojanUrl();
+  if (!link) {
+    showError(translations[currentLang].hgNoConfig);
+    return;
+  }
+  // The link carries the access key: warn before putting it on the clipboard.
+  const allowed = await askShareWarning();
+  if (!allowed) return;
+  const copied = await copyToClipboard(link, 'hgLinkCopied');
+  if (!copied) showError(translations[currentLang].hgCopyFailed);
+});
+
+shareWarnCancel?.addEventListener('click', () => resolveCopyWarning(false));
+shareWarnCopy?.addEventListener('click', () => resolveCopyWarning(true));
 
 // Delete config — two-click confirm, auto-disconnects if proxy is active.
 function resetDeleteButton() {
@@ -558,6 +698,9 @@ btnDeleteConfig.addEventListener('click', async () => {
     if (res && res.success) {
       configInput.value = '';
       parsedConfig = null;
+      window.appHasConfig = false;
+      configSource = 'manual';
+      haiogateAccountId = null;
       lastStatus = null;
       toggle.checked = false;
       statusBadge.textContent = 'OFF';
@@ -573,6 +716,7 @@ btnDeleteConfig.addEventListener('click', async () => {
       updateTrojanUI();
       setConfigStatus('', null);
       showOnboarding();
+      window.portalModule?.refreshSession?.();
     } else {
       showError(res?.error || t.deleteFailed);
     }
@@ -1021,12 +1165,16 @@ async function init() {
   updateThemeUI(getThemeMode(), getResolvedTheme());
   setConn('off', translations[currentLang].proxyOff);
 
+  // Portal initialisation is additive: if it fails, the VPN UI keeps working.
+  await initPortal().catch(() => {});
+
   const config = await loadConfig();
   if (config) {
     await Promise.all([loadStatus(), loadBypassDomains()]);
   } else {
     await loadBypassDomains();
   }
+  refreshHomeCard();
   checkForUpdates();
 }
 

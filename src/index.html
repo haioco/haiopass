@@ -28,6 +28,10 @@
           </svg>
         </button>
         <button class="lang-toggle" id="langToggle" type="button">EN</button>
+        <button class="account-chip" id="accountChip" type="button" data-i18n-title="hgAccount">
+          <span class="account-dot" id="accountDot" data-state="guest"></span>
+          <span class="account-chip-text" id="accountChipText" data-i18n="hgLogin">ورود</span>
+        </button>
         <span class="status-badge" id="statusBadge">OFF</span>
       </div>
     </header>
@@ -53,7 +57,11 @@
           <p data-i18n="welcomeDesc">Paste your access key to get started.</p>
         </div>
 
-        <div class="card">
+        <div class="card onboarding-path" id="guestPathCard">
+          <div class="path-head">
+            <span class="path-badge" data-i18n="hgGuest">مهمان</span>
+            <span class="path-title" data-i18n="hgGuestExplain">لینک کانفیگ دارید؟ بدون حساب وارد شوید</span>
+          </div>
           <label class="field-label" for="configInput" data-i18n="configLabel">Your Access Key</label>
           <textarea
             id="configInput"
@@ -67,6 +75,21 @@
             <span class="config-status" id="configStatus" aria-live="polite"></span>
             <button class="btn primary" id="saveConfigBtn" type="button" data-i18n="saveConfig">Save Config</button>
           </div>
+        </div>
+
+        <div class="onboarding-divider"><span data-i18n="hgOr">یا</span></div>
+
+        <div class="card onboarding-path account-path">
+          <div class="path-head">
+            <span class="path-badge account" data-i18n="hgAccountShort">حساب</span>
+            <span class="path-title" data-i18n="hgHaveAccount">حساب هایو دارید؟</span>
+          </div>
+          <p class="path-desc" data-i18n="hgAccountPathDesc">
+            خرید و تمدید هایو گیت، مشاهده مصرف و اتصال مستقیم.
+          </p>
+          <button class="btn primary block" id="onboardingLoginBtn" type="button" data-i18n="hgLoginWithMobile">
+            ورود با شماره موبایل
+          </button>
         </div>
 
         <p class="onboarding-hint">
@@ -119,7 +142,24 @@
 
             <div class="domain-meta" id="domainMeta"></div>
             <div class="hero-actions">
+              <button class="btn ghost sm" id="btnCopyConfig" type="button" data-i18n="hgCopyLink">کپی لینک اتصال</button>
               <button class="btn ghost sm" id="btnRefreshDomains" type="button" data-i18n="refreshDomains">Refresh domains</button>
+            </div>
+          </div>
+
+          <!-- HaioGate summary: shown when the applied config came from an account -->
+          <div class="card hg-home-card hidden" id="homeHaioGateCard">
+            <div class="hg-home-head">
+              <span class="hg-home-badge" data-i18n="hgTab">هایو گیت</span>
+              <span class="hg-chip" id="homeHgStatus">—</span>
+            </div>
+            <div class="hg-home-body">
+              <strong id="homeHgName">—</strong>
+              <span class="hg-home-usage" id="homeHgUsage"></span>
+              <span class="hg-home-expiry" id="homeHgExpiry"></span>
+            </div>
+            <div class="hg-home-actions">
+              <button class="btn ghost sm" id="homeHgManage" type="button" data-i18n="hgManageAccount">مدیریت اکانت</button>
             </div>
           </div>
 
@@ -150,14 +190,175 @@
             </button>
           </div>
 
-          <a class="buy-banner" href="https://console.haio.ir" target="_blank" rel="noopener">
+          <button class="buy-banner" id="buyBannerBtn" type="button">
             <span class="buy-icon" aria-hidden="true">&#128722;</span>
             <span class="buy-text">
-              <strong data-i18n="buyConfig">Buy Config</strong>
-              <small>console.haio.ir</small>
+              <strong data-i18n="hgBuyNew">خرید پکیج جدید</strong>
+              <small data-i18n="hgBuyBannerSub">خرید و تمدید در همان برنامه</small>
             </span>
             <span class="buy-arrow" aria-hidden="true">&rarr;</span>
-          </a>
+          </button>
+        </section>
+
+        <!-- HAIO GATE -->
+        <section class="view-panel hidden" data-view="haiogate" id="view-haiogate" role="tabpanel" aria-labelledby="tab-haiogate">
+
+          <!-- Session restore skeleton -->
+          <div class="hg-restoring" id="hgRestoring">
+            <div class="spinner"></div>
+            <span data-i18n="hgRestoring">در حال بازیابی نشست…</span>
+          </div>
+
+          <!-- Logged out -->
+          <div class="hg-screen hidden" id="hgLoggedOut">
+            <div class="hg-hero">
+              <div class="hg-hero-orb" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3l7 3v5c0 4.6-3 8.4-7 10-4-1.6-7-5.4-7-10V6l7-3z"/>
+                  <path d="M9 12l2 2 4-4"/>
+                </svg>
+              </div>
+              <h1 data-i18n="hgTab">هایو گیت</h1>
+              <p data-i18n="hgLoggedOutSub">یک حساب برای خرید، تمدید و مدیریت دسترسی به سرویس‌های جهانی.</p>
+            </div>
+            <ul class="hg-benefits">
+              <li><span aria-hidden="true">&#10003;</span><span data-i18n="hgBenefit1">خرید و تمدید در همان برنامه</span></li>
+              <li><span aria-hidden="true">&#10003;</span><span data-i18n="hgBenefit2">مشاهده مصرف و تاریخ انقضا</span></li>
+              <li><span aria-hidden="true">&#10003;</span><span data-i18n="hgBenefit3">اتصال با یک کلیک پس از خرید</span></li>
+            </ul>
+            <button class="btn primary block" id="hgLoginBtn" type="button" data-i18n="hgLoginWithMobile">ورود با شماره موبایل</button>
+            <button class="btn ghost block" id="hgPlansBtn" type="button" data-i18n="hgViewPlans">مشاهده پلن‌ها</button>
+            <p class="hg-fine">
+              <span data-i18n="hgGuestHint">مهمان هستید؟ لینک کانفیگ خود را از صفحه خانه وارد کنید.</span>
+            </p>
+            <p class="hg-fine">
+              <a href="https://console.haio.ir" target="_blank" rel="noopener" data-i18n="hgViewInConsole">مشاهده در پنل</a>
+            </p>
+          </div>
+
+          <!-- Login -->
+          <div class="hg-screen hidden" id="hgLogin">
+            <div class="view-head">
+              <div>
+                <h1 data-i18n="hgLoginTitle">ورود به حساب هایو</h1>
+                <p class="view-sub" data-i18n="hgLoginSub">شماره موبایل خود را وارد کنید.</p>
+              </div>
+            </div>
+            <div class="card">
+              <label class="field-label" for="hgMobileInput" data-i18n="hgMobile">شماره موبایل</label>
+              <input
+                id="hgMobileInput"
+                class="text-input mono"
+                type="tel"
+                inputmode="numeric"
+                autocomplete="tel"
+                maxlength="14"
+                placeholder="09xxxxxxxxx"
+                dir="ltr" />
+              <label class="field-label hidden" id="hgOtpLabel" for="hgOtpInput" data-i18n="hgOtp">کد تایید ۶ رقمی</label>
+              <input
+                id="hgOtpInput"
+                class="text-input mono hidden"
+                type="text"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                maxlength="6"
+                placeholder="------"
+                dir="ltr" />
+              <div class="hg-form-msg" id="hgLoginMsg" role="status" aria-live="polite"></div>
+              <div class="hg-form-actions">
+                <button class="btn primary block" id="hgOtpSubmit" type="button" data-i18n="hgSendOtp">ارسال کد تایید</button>
+                <button class="btn ghost hidden" id="hgResendBtn" type="button" data-i18n="hgResend">ارسال دوباره کد</button>
+                <button class="btn ghost hidden" id="hgChangeMobile" type="button" data-i18n="hgChangeNumber">تغییر شماره</button>
+              </div>
+            </div>
+            <p class="hg-fine" data-i18n="hgOtpHint">کد تایید از طریق پیامک ارسال می‌شود و پس از ورود پاک می‌شود.</p>
+          </div>
+
+          <!-- Account list -->
+          <div class="hg-screen hidden" id="hgList">
+            <div class="hg-account-strip">
+              <div class="hg-account-main">
+                <span class="hg-account-name" id="hgAccountName">&mdash;</span>
+                <span class="hg-account-mobile mono" id="hgAccountMobile"></span>
+              </div>
+              <span class="hg-badge" id="hgShahkarBadge"></span>
+              <button class="btn ghost sm" id="hgLogoutBtn" type="button" data-i18n="hgLogout">خروج</button>
+            </div>
+
+            <div class="hg-notice hidden" id="hgKeyringNotice" data-i18n="hgKeyringFallback">
+              ورود شما تا بستن برنامه حفظ می‌شود؛ ذخیره‌سازی امن سیستم در دسترس نیست.
+            </div>
+
+            <div class="hg-payment-banner hidden" id="hgPaymentBanner">
+              <div class="hg-payment-copy">
+                <strong id="hgPaymentTitle"></strong>
+                <small id="hgPaymentMeta"></small>
+              </div>
+              <div class="hg-payment-actions">
+                <button class="btn ghost sm" id="hgCheckPayment" type="button" data-i18n="hgCheckStatus">بررسی وضعیت</button>
+                <button class="btn primary sm hidden" id="hgResumePayment" type="button" data-i18n="hgResumePayment">ادامه پرداخت</button>
+                <button class="btn ghost sm" id="hgForgetPayment" type="button" data-i18n="hgForgetPending">انصراف</button>
+              </div>
+            </div>
+
+            <div class="hg-section-head">
+              <span class="section-title" data-i18n="hgActive">اکانت‌های فعال</span>
+              <button class="hg-icon-btn" id="hgRefreshBtn" type="button" data-i18n-title="hgRefresh">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/>
+                </svg>
+              </button>
+            </div>
+            <div class="hg-cards" id="hgActiveList"></div>
+
+            <div class="hg-section-head" id="hgExpiredHead">
+              <span class="section-title" data-i18n="hgExpired">اکانت‌های منقضی شده</span>
+            </div>
+            <div class="hg-cards" id="hgExpiredList"></div>
+
+            <div class="hg-section-head" id="hgSupportHead">
+              <span class="section-title" data-i18n="hgSupport">نیازمند پشتیبانی</span>
+            </div>
+            <div class="hg-cards" id="hgSupportList"></div>
+
+            <div class="hg-empty" id="hgNoAccounts">
+              <span data-i18n="hgNoAccounts">هنوز اکانت هایو گیت ندارید.</span>
+            </div>
+
+            <button class="btn primary block" id="hgBuyBtn" type="button" data-i18n="hgBuyNew">خرید پکیج جدید</button>
+          </div>
+
+          <!-- Account detail -->
+          <div class="hg-screen hidden" id="hgDetail">
+            <div class="hg-detail-head">
+              <button class="hg-back-btn" id="hgDetailBack" type="button" data-i18n-title="hgBack" data-i18n="hgBack">بازگشت</button>
+            </div>
+            <div id="hgDetailBody"></div>
+            <div class="hg-members-section" id="hgDetailMembers"></div>
+            <div class="hg-detail-actions" id="hgDetailActions"></div>
+          </div>
+
+          <!-- Packages -->
+          <div class="hg-screen hidden" id="hgPackages">
+            <div class="hg-detail-head">
+              <button class="hg-back-btn" id="hgPackagesBack" type="button" data-i18n="hgBack">بازگشت</button>
+            </div>
+            <div class="view-head">
+              <div>
+                <h1 id="hgPackagesTitle" data-i18n="hgBuyNew">خرید پکیج جدید</h1>
+                <p class="view-sub" id="hgPackagesHint" data-i18n="hgSelectPackage">پکیج مورد نظر را انتخاب کنید.</p>
+              </div>
+            </div>
+            <div class="hg-org-box hidden" id="hgOrgPicker">
+              <span class="field-label" data-i18n="hgOrgPick">حساب سازمانی</span>
+              <select class="text-input" id="hgOrgSelect"></select>
+              <button class="btn primary sm" id="hgOrgConfirm" type="button" data-i18n="hgConfirm">تایید</button>
+            </div>
+            <div class="hg-packages" id="hgPackagesList"></div>
+            <div class="hg-confirm hidden" id="hgConfirmBox"></div>
+          </div>
+
         </section>
 
         <!-- BYPASS -->
@@ -298,6 +499,12 @@
         </svg>
         <span data-i18n="tabHome">Home</span>
       </button>
+      <button class="tab-btn" type="button" role="tab" id="tab-haiogate" data-tab="haiogate" aria-controls="view-haiogate" aria-selected="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 8h16l-1.4 12H5.4L4 8z"/><path d="M8.5 8V6a3.5 3.5 0 0 1 7 0v2"/>
+        </svg>
+        <span data-i18n="hgTab">هایو گیت</span>
+      </button>
       <button class="tab-btn" type="button" role="tab" id="tab-bypass" data-tab="bypass" aria-controls="view-bypass" aria-selected="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 3l7 3v5c0 4.6-3 8.4-7 10-4-1.6-7-5.4-7-10V6l7-3z"/>
@@ -314,6 +521,44 @@
       </button>
     </nav>
 
+    <!-- Shahkar identity verification: required before buy/renew. The national
+         code is sent once and cleared; it is never persisted. -->
+    <div class="consent-modal hidden" id="shahkarModal" role="dialog" aria-modal="true" aria-labelledby="shahkarTitle">
+      <div class="consent-card hg-modal">
+        <span class="card-label" id="shahkarTitle" data-i18n="hgShahkarTitle">احراز هویت شاهکار</span>
+        <p data-i18n="hgShahkarRequired">برای خرید و تمدید هایو گیت، احراز هویت لازم است.</p>
+        <label class="field-label" for="shahkarMobile" data-i18n="hgShahkarMobile">شماره موبایل حساب</label>
+        <input id="shahkarMobile" class="text-input mono" type="text" readonly dir="ltr" />
+        <label class="field-label" for="shahkarNational" data-i18n="hgNationalCode">کد ملی</label>
+        <input id="shahkarNational" class="text-input mono" type="text" inputmode="numeric" maxlength="10" placeholder="۱۰ رقم" dir="ltr" autocomplete="off" />
+        <p class="hg-modal-note" data-i18n="hgShahkarPrivacy">کد ملی فقط برای استعلام شاهکار ارسال می‌شود و در برنامه ذخیره نمی‌شود.</p>
+        <div class="hg-form-msg" id="shahkarMsg" role="status" aria-live="polite"></div>
+        <div class="consent-actions">
+          <button class="btn ghost" id="shahkarCancel" type="button" data-i18n="hgCancel">انصراف</button>
+          <button class="btn primary" id="shahkarSubmit" type="button" data-i18n="hgShahkarSubmit">تایید هویت</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Account panel from the header chip -->
+    <div class="consent-modal hidden" id="accountModal" role="dialog" aria-modal="true" aria-labelledby="accountModalTitle">
+      <div class="consent-card hg-modal">
+        <span class="card-label" id="accountModalTitle" data-i18n="hgAccount">حساب</span>
+        <div class="hg-account-panel">
+          <div class="hg-panel-row"><span data-i18n="hgName">نام</span><strong id="accountPanelName">—</strong></div>
+          <div class="hg-panel-row"><span data-i18n="hgMobile">شماره موبایل</span><strong class="mono" id="accountPanelMobile">—</strong></div>
+          <div class="hg-panel-row"><span data-i18n="hgShahkarTitle">احراز هویت شاهکار</span><strong id="accountPanelShahkar">—</strong></div>
+        </div>
+        <p class="hg-modal-note" id="accountPanelPersist"></p>
+        <p class="hg-modal-note" data-i18n="hgLogoutKeepsConfig">با خروج از حساب، تنظیمات اتصال فعلی حذف نمی‌شود.</p>
+        <div class="consent-actions">
+          <button class="btn ghost" id="accountPanelClose" type="button" data-i18n="hgClose">بستن</button>
+          <button class="btn danger" id="accountPanelShahkarBtn" type="button" data-i18n="hgVerifyIdentity">احراز هویت</button>
+          <button class="btn danger" id="accountPanelLogout" type="button" data-i18n="hgLogout">خروج</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Error / notification toast -->
     <div class="toast hidden" id="errorMsg" role="alert" aria-live="assertive">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -321,6 +566,19 @@
       </svg>
       <span class="toast-text" id="errorText"></span>
       <button class="toast-close" id="errorClose" type="button" aria-label="Dismiss">&times;</button>
+    </div>
+
+    <!-- Sharing warning before the connection link (bearer secret) goes to
+         the clipboard. -->
+    <div class="consent-modal hidden" id="shareWarnModal" role="dialog" aria-modal="true" aria-labelledby="shareWarnTitle">
+      <div class="consent-card">
+        <span class="card-label" id="shareWarnTitle" data-i18n="hgCopyLink">کپی لینک اتصال</span>
+        <p data-i18n="hgCopyLinkWarn">لینک اتصال کلید دسترسی شماست. با کسی به اشتراک نگذارید.</p>
+        <div class="consent-actions">
+          <button class="btn ghost" id="shareWarnCancel" type="button" data-i18n="hgCancel">انصراف</button>
+          <button class="btn primary" id="shareWarnCopy" type="button" data-i18n="hgCopy">کپی</button>
+        </div>
+      </div>
     </div>
 
     <!-- OS proxy consent dialog: shown once, before the first system
