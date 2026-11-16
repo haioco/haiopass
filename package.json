@@ -1,7 +1,7 @@
 {
   "name": "HaioBypass",
   "private": true,
-  "version": "4.0.0",
+  "version": "5.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,5 +12,8 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
     "vite": "^5.0.0"
+  },
+  "dependencies": {
+    "qrcode-generator": "^2.0.4"
   }
 }

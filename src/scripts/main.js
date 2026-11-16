@@ -57,6 +57,7 @@ const shareWarnCancel = $('shareWarnCancel');
 const btnDeleteConfig = $('btnDeleteConfig');
 const googlePreset = $('googlePreset');
 const googlePresetAction = $('googlePresetAction');
+const onboardingReturnBtn = $('onboardingReturnBtn');
 
 const LANG_KEY = 'haiobypass:lang';
 
@@ -110,12 +111,15 @@ let lastStatus = null;
 let lastDomainError = '';
 let connState = 'off';
 let deleteTimer = null;
+let forgetArmed = false;
+let forgetTimer = null;
 let toastTimer = null;
 let trojanRunning = false;
 let needsProxyConsent = false;
 let currentTab = 'home';
 let configSource = 'manual';
 let haiogateAccountId = null;
+let deviceIdentity = null;
 let copyWarnResolve = null;
 
 /* ------------------------------------------------------------------ */
@@ -169,6 +173,7 @@ function setLanguage(lang) {
   renderConfigStatus();
   updateTrojanUI();
   resetDeleteButton();
+  resetForgetButton();
 
   if (lastStatus) {
     applyStatusLabels(lastStatus);
@@ -278,6 +283,7 @@ function showDashboard() {
   configOnlyCard.classList.add('hidden');
   dashboard.classList.remove('hidden');
   tabBar.classList.remove('hidden');
+  onboardingReturnBtn?.classList.add('hidden');
   switchTab(currentTab);
 }
 
@@ -285,9 +291,16 @@ function showOnboarding() {
   dashboard.classList.add('hidden');
   tabBar.classList.add('hidden');
   configOnlyCard.classList.remove('hidden');
+  // Keep a way back when this screen was opened from a configured app (guest
+  // invite path); otherwise the user would have to apply a config to leave.
+  onboardingReturnBtn?.classList.toggle('hidden', !parsedConfig);
   currentTab = 'home';
   showError(null);
 }
+
+onboardingReturnBtn?.addEventListener('click', () => {
+  if (parsedConfig) showDashboard();
+});
 
 // The HaioGate tab must be reachable before a config exists (new user buys a
 // package first, then applies it). This reveals the app shell without
@@ -300,6 +313,12 @@ function enterPortalTab() {
 }
 
 window.appEnterPortal = enterPortalTab;
+
+// Guest invite enrollment must stay reachable when a config already exists
+// (replacing it requires the confirmation in the invite panel). The onboarding
+// screen holds that panel; reveal it without deleting the saved config.
+window.appShowOnboarding = showOnboarding;
+window.appShowDashboard = showDashboard;
 
 /* ------------------------------------------------------------------ */
 /* Shared UI helpers                                                   */
@@ -372,7 +391,9 @@ function renderConfigStatus() {
     setConfigStatus('', null);
     return;
   }
-  setConfigStatus(`\u2713 ${parsedConfig.server}:${parsedConfig.port}`, true);
+  const t = translations[currentLang];
+  const bound = deviceIdentity ? ` · ${t.hgDeviceBound}` : '';
+  setConfigStatus(`\u2713 ${parsedConfig.server}:${parsedConfig.port}${bound}`, true);
 }
 
 function updateServerStat() {
@@ -391,17 +412,98 @@ function refreshHomeCard() {
   }
 }
 
+function fmtDeviceDate(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat(
+      currentLang === 'fa' ? 'fa-IR-u-ca-persian' : 'en-GB',
+      { year: 'numeric', month: 'short', day: 'numeric' }
+    ).format(date);
+  } catch (_) {
+    return date.toLocaleDateString();
+  }
+}
+
+/// Badge in the hero: which credential is applied right now. A device-bound
+/// HaioGate credential is visually distinct from a plain account config.
+function renderActiveConfigBadge(data) {
+  const node = $('activeConfigBadge');
+  if (!node) return;
+  const t = translations[currentLang];
+  const device = data?.deviceIdentity;
+  if (device) {
+    node.textContent = t.hgDeviceBadge.replace(
+      '{id}',
+      device.fingerprintPrefix ? device.fingerprintPrefix.slice(0, 8) : ''
+    );
+    node.classList.remove('hidden');
+  } else if (data?.configSource === 'haiogate') {
+    node.textContent = t.hgTab;
+    node.classList.remove('hidden');
+  } else {
+    node.textContent = '';
+    node.classList.add('hidden');
+  }
+}
+
+function renderDeviceSettings(data) {
+  const text = $('deviceCardText');
+  const btn = $('btnForgetDevice');
+  if (!text || !btn) return;
+  const t = translations[currentLang];
+  const device = data?.deviceIdentity;
+  if (device) {
+    const parts = [];
+    if (device.deviceName) parts.push(device.deviceName);
+    if (device.platform) parts.push(device.platform);
+    if (device.fingerprintPrefix) {
+      parts.push(`#${device.fingerprintPrefix.slice(0, 8)}`);
+    }
+    const expiry = fmtDeviceDate(device.certExpiresAt);
+    if (expiry) parts.push(`${t.hgDeviceCertExpiry}: ${expiry}`);
+    text.textContent = parts.join(' · ');
+    if (device.keyringPersistent === false) {
+      text.textContent = `${text.textContent} — ${t.hgDeviceKeyringUnavailable}`;
+    }
+    btn.classList.remove('hidden');
+    if (!forgetArmed) btn.textContent = t.hgDeviceForget;
+  } else {
+    text.textContent = t.hgDeviceNone;
+    btn.classList.add('hidden');
+    btn.textContent = t.hgDeviceForget;
+  }
+}
+
+function syncPortalActiveConfig() {
+  if (window.portalModule?.setActiveConfig) {
+    window.portalModule.setActiveConfig(configSource, haiogateAccountId);
+  }
+}
+
 async function appConfigChanged(detail = {}) {
   configSource = detail.source || 'manual';
   haiogateAccountId = detail.accountId || null;
   await loadConfig();
   await loadStatus({ skipHealth: true });
   refreshHomeCard();
+  syncPortalActiveConfig();
 }
 
 window.appConfigChanged = appConfigChanged;
 window.appRefreshHomeCard = refreshHomeCard;
 window.appHasConfig = false;
+
+// Used by the invite success panel after an enrollment.
+window.appEnableProxy = async () => {
+  const res = await invoke('enable_proxy');
+  if (!res || !res.success) {
+    throw new Error(res?.error || translations[currentLang].unknownError);
+  }
+  await loadStatus();
+  return res;
+};
 
 function domainCountText(data) {
   const t = translations[currentLang];
@@ -442,7 +544,11 @@ function applyStatusLabels(data, skipHealth = false) {
 
   if (typeof data.configSource === 'string') configSource = data.configSource;
   haiogateAccountId = data.haiogateAccountId || null;
+  if (data.deviceIdentity !== undefined) deviceIdentity = data.deviceIdentity || null;
   refreshHomeCard();
+  syncPortalActiveConfig();
+  renderActiveConfigBadge(data);
+  renderDeviceSettings(data);
 
   if (needsProxyConsent) {
     // The tunnel may be running, but without OS-proxy consent browser
@@ -539,6 +645,8 @@ async function loadConfig() {
       configInput.value = state.trojanUrl;
       if (typeof state.configSource === 'string') configSource = state.configSource;
       haiogateAccountId = state.haiogateAccountId || null;
+      deviceIdentity = state.deviceCertificate || null;
+      syncPortalActiveConfig();
       const parsed = parseAccessKey(state.trojanUrl);
       if (parsed) {
         parsedConfig = parsed;
@@ -554,15 +662,40 @@ async function loadConfig() {
       window.appHasConfig = false;
       parsedConfig = null;
       setConfigStatus(translations[currentLang].invalidConfig, false);
+    } else if (state.trojanConfig && state.trojanConfig.server) {
+      // Device-lock credential: there is no bearer URL to show or copy, only
+      // the structured config installed by enrollment.
+      configInput.value = '';
+      if (typeof state.configSource === 'string') configSource = state.configSource;
+      haiogateAccountId = state.haiogateAccountId || null;
+      deviceIdentity = state.deviceCertificate || null;
+      syncPortalActiveConfig();
+      parsedConfig = {
+        password: state.trojanConfig.password,
+        server: state.trojanConfig.server,
+        port: Number(state.trojanConfig.port) || 443,
+        sni: state.trojanConfig.sni || state.trojanConfig.server,
+        raw: '',
+      };
+      window.appHasConfig = true;
+      renderConfigStatus();
+      updateServerStat();
+      btnSetup.disabled = false;
+      showDashboard();
+      window.portalModule?.refreshSession?.();
+      refreshHomeCard();
+      return parsedConfig;
     } else {
       window.appHasConfig = false;
       configInput.value = '';
       parsedConfig = null;
+      deviceIdentity = null;
       setConfigStatus('', null);
     }
   } catch (error) {
     parsedConfig = null;
     window.appHasConfig = false;
+    deviceIdentity = null;
     setConfigStatus(String(error) || translations[currentLang].invalidConfig, false);
   }
 
@@ -600,6 +733,9 @@ saveConfigBtn.addEventListener('click', async () => {
     window.appHasConfig = true;
     configSource = 'manual';
     haiogateAccountId = null;
+    deviceIdentity = null;
+    syncPortalActiveConfig();
+    window.dispatchEvent(new CustomEvent('app:config-cleared'));
     renderConfigStatus();
     updateServerStat();
     btnSetup.disabled = false;
@@ -656,6 +792,12 @@ async function currentTrojanUrl() {
 }
 
 btnCopyConfig?.addEventListener('click', async () => {
+  // A locked credential has no copyable bearer link; only the certificate can
+  // connect. Explain that instead of copying a useless password URL.
+  if (deviceIdentity) {
+    showError(translations[currentLang].hgDeviceNoLink);
+    return;
+  }
   const link = await currentTrojanUrl();
   if (!link) {
     showError(translations[currentLang].hgNoConfig);
@@ -701,6 +843,8 @@ btnDeleteConfig.addEventListener('click', async () => {
       window.appHasConfig = false;
       configSource = 'manual';
       haiogateAccountId = null;
+      deviceIdentity = null;
+      syncPortalActiveConfig();
       lastStatus = null;
       toggle.checked = false;
       statusBadge.textContent = 'OFF';
@@ -715,6 +859,9 @@ btnDeleteConfig.addEventListener('click', async () => {
       trojanRunning = false;
       updateTrojanUI();
       setConfigStatus('', null);
+      renderActiveConfigBadge({});
+      renderDeviceSettings({});
+      window.dispatchEvent(new CustomEvent('app:config-cleared'));
       showOnboarding();
       window.portalModule?.refreshSession?.();
     } else {
@@ -730,6 +877,44 @@ btnDeleteConfig.addEventListener('click', async () => {
 /* ------------------------------------------------------------------ */
 /* Status & connection                                                 */
 /* ------------------------------------------------------------------ */
+
+function resetForgetButton() {
+  clearTimeout(forgetTimer);
+  forgetTimer = null;
+  forgetArmed = false;
+  const btn = $('btnForgetDevice');
+  if (!btn) return;
+  btn.classList.remove('confirming');
+  btn.textContent = translations[currentLang].hgDeviceForget;
+}
+
+$('btnForgetDevice')?.addEventListener('click', async () => {
+  const t = translations[currentLang];
+  const btn = $('btnForgetDevice');
+  if (!btn) return;
+  if (!forgetArmed) {
+    forgetArmed = true;
+    btn.classList.add('confirming');
+    btn.textContent = t.hgDeviceForgetConfirm;
+    forgetTimer = setTimeout(resetForgetButton, 4000);
+    return;
+  }
+
+  resetForgetButton();
+  btn.disabled = true;
+  try {
+    await invoke('portal_forget_device_identity');
+    deviceIdentity = null;
+    window.dispatchEvent(new CustomEvent('app:config-cleared'));
+    await loadConfig();
+    await loadStatus({ skipHealth: true });
+    showNotice(t.hgDeviceForgotten);
+  } catch (error) {
+    showError(String(error) || t.unknownError);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 async function loadStatus(options = {}) {
   let data;

@@ -662,6 +662,23 @@ a {
   min-height: 13px;
 }
 
+/* Which credential is applied: manual, HaioGate account or enrolled device. */
+.config-badge {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--brand-ring);
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 9.5px;
+  font-weight: 600;
+  direction: ltr;
+  unicode-bidi: plaintext;
+}
+
 .conn-status {
   display: inline-flex;
   align-items: center;
@@ -1920,6 +1937,12 @@ label.setting-row { cursor: pointer; }
   box-shadow: var(--shadow-sm);
 }
 
+.hg-card.active {
+  border-color: var(--success);
+  background: var(--success-soft);
+  box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.10), var(--shadow-sm);
+}
+
 .hg-card-head {
   display: flex;
   align-items: center;
@@ -2116,6 +2139,105 @@ label.setting-row { cursor: pointer; }
 
 .hg-cred-box strong { font-size: 11.5px; color: var(--brand); }
 .hg-cred-warn { font-size: 10px; line-height: 1.6; color: var(--text-2); }
+
+/* --- Device lock / invites --------------------------------- */
+
+.onboarding-path.invite-path {
+  border-color: var(--brand-ring);
+}
+
+.invite-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 11px;
+  border: 1px solid var(--brand-ring);
+  border-radius: var(--radius-sm);
+  background: var(--brand-soft);
+}
+
+.invite-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.invite-preview-head strong { font-size: 12px; }
+
+.invite-success {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.invite-success > strong {
+  font-size: 12px;
+  color: var(--success);
+}
+
+.invite-success > small {
+  font-size: 10px;
+  color: var(--text-2);
+}
+
+.hg-device-line {
+  color: var(--muted);
+  font-size: 9.5px;
+  direction: ltr;
+  unicode-bidi: plaintext;
+}
+
+.hg-invite-box {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 11px;
+  border: 1px solid var(--brand-ring);
+  border-radius: var(--radius-sm);
+  background: var(--brand-soft);
+}
+
+.hg-invite-box > strong { font-size: 11.5px; color: var(--brand); }
+
+.hg-invite-url {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+
+.hg-invite-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+
+.hg-qr-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 8px;
+}
+
+.hg-qr {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 10px;
+  width: fit-content;
+  margin: 0 auto;
+}
+
+.hg-qr svg {
+  width: 168px;
+  height: 168px;
+  display: block;
+}
 
 /* --- Packages --------------------------------------------- */
 

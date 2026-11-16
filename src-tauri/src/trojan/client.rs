@@ -27,7 +27,8 @@
 //! production trojan-gfw server). Reading a "status byte" here would
 //! consume the first payload byte of every stream.
 
-use std::sync::{Arc, OnceLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -59,10 +60,11 @@ pub type TrojanStream = Box<dyn TrojanStreamImpl>;
 /// configured with (`trojan/config_writer.rs`, now deleted):
 /// - certificate verification on, against `sni` (not `remote_addr`)
 /// - ALPN `["h2", "http/1.1"]`
-/// - TLS session resumption enabled
+/// - TLS session resumption enabled for password-only credentials
+/// - client certificate + key for device-lock credentials
 ///
 /// Native cert stores (Windows: system store) provide the roots.
-fn build_tls_config() -> crate::error::Result<rustls::ClientConfig> {
+fn build_tls_config(identity: Option<&str>) -> crate::error::Result<rustls::ClientConfig> {
     let mut roots = rustls::RootCertStore::empty();
     let loaded = rustls_native_certs::load_native_certs();
     for cert in loaded.certs {
@@ -79,26 +81,98 @@ fn build_tls_config() -> crate::error::Result<rustls::ClientConfig> {
         ));
     }
 
-    let mut config = rustls::ClientConfig::builder()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
+    let builder = rustls::ClientConfig::builder().with_root_certificates(roots);
+    let mut config = match identity {
+        Some(identity_id) => {
+            let material = crate::device::identity::material(identity_id).ok_or_else(|| {
+                HaioError::Trojan(
+                    "The enrolled device certificate is not loaded; re-enroll this device".into(),
+                )
+            })?;
+            builder
+                .with_client_auth_cert(
+                    material.cert_chain.clone(),
+                    material.key.clone_key(),
+                )
+                .map_err(|e| HaioError::Trojan(format!("Invalid device certificate: {}", e)))?
+        }
+        None => builder.with_no_client_auth(),
+    };
     config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    // Shared in-memory session cache: every connection skips full certificate
-    // chain validation whenever the server allows resumption. Required for
-    // performance parity with trojan-go (`reuse_session`/`session_ticket`).
-    config.resumption = rustls::client::Resumption::in_memory_sessions(256);
+    // Session resumption is safe and useful for password-only credentials.
+    // With a client certificate it is a possession-check bypass: a resumed
+    // TLS 1.3 session does not re-authenticate the certificate (plan §22.1),
+    // so device identities always perform a full handshake.
+    config.resumption = if resumption_enabled(identity) {
+        // Shared in-memory session cache: every connection skips full
+        // certificate chain validation whenever the server allows resumption.
+        rustls::client::Resumption::in_memory_sessions(256)
+    } else {
+        rustls::client::Resumption::disabled()
+    };
     Ok(config)
 }
 
-/// The client config is built once (loading the system trust store is not
-/// free) and shared for the lifetime of the process, which is what makes the
-/// session cache effective across connections.
-fn shared_tls_config() -> crate::error::Result<Arc<rustls::ClientConfig>> {
-    static CONFIG: OnceLock<Result<Arc<rustls::ClientConfig>, String>> = OnceLock::new();
-    match CONFIG.get_or_init(|| build_tls_config().map(Arc::new).map_err(|e| e.to_string())) {
-        Ok(config) => Ok(config.clone()),
-        Err(msg) => Err(HaioError::Trojan(msg.clone())),
+fn resumption_enabled(identity: Option<&str>) -> bool {
+    identity.is_none()
+}
+
+/// TLS config cache key. The device-identity generation is part of the key, so
+/// a re-enrollment can never reuse a config built with the previous
+/// certificate. Password-only entries (`identity == None`) share one config per
+/// SNI.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TlsCacheKey {
+    sni: String,
+    identity: Option<String>,
+    generation: u64,
+}
+
+fn tls_cache_key(sni: &str, identity: Option<&str>, generation: u64) -> TlsCacheKey {
+    TlsCacheKey {
+        sni: sni.to_string(),
+        identity: identity.map(str::to_string),
+        generation,
     }
+}
+
+fn tls_cache() -> &'static Mutex<HashMap<TlsCacheKey, Arc<rustls::ClientConfig>>> {
+    static CACHE: OnceLock<Mutex<HashMap<TlsCacheKey, Arc<rustls::ClientConfig>>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn lock_cache() -> std::sync::MutexGuard<'static, HashMap<TlsCacheKey, Arc<rustls::ClientConfig>>>
+{
+    tls_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The client config is cached per `(sni, device identity, generation)`: the
+/// system trust store load is not free, and this is what keeps the session
+/// cache effective across connections.
+fn tls_config(
+    sni: &str,
+    identity: Option<&str>,
+) -> crate::error::Result<Arc<rustls::ClientConfig>> {
+    let generation = crate::device::identity::generation();
+    let key = tls_cache_key(sni, identity, generation);
+
+    {
+        let mut cache = lock_cache();
+        // Entries from an older identity generation can never be valid again.
+        if cache.keys().any(|entry| entry.generation != generation) {
+            cache.clear();
+        }
+        if let Some(config) = cache.get(&key) {
+            return Ok(config.clone());
+        }
+    }
+
+    let config = Arc::new(build_tls_config(identity)?);
+    lock_cache().insert(key, config.clone());
+    Ok(config)
 }
 
 /// Lowercase hex of SHA224(password) — the Trojan auth token.
@@ -178,7 +252,10 @@ async fn open(
     let server_name = rustls::pki_types::ServerName::try_from(sni.to_string())
         .map_err(|e| HaioError::Trojan(format!("Invalid SNI '{}': {}", sni, e)))?;
 
-    let connector = tokio_rustls::TlsConnector::from(shared_tls_config()?);
+    let connector = tokio_rustls::TlsConnector::from(tls_config(
+        sni,
+        config.device_identity_id.as_deref(),
+    )?);
     let mut tls = tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
         connector.connect(server_name, tcp),
@@ -226,7 +303,9 @@ pub async fn probe(config: &TrojanConfig) -> bool {
     let Ok(server_name) = rustls::pki_types::ServerName::try_from(sni.to_string()) else {
         return false;
     };
-    let Ok(connector) = shared_tls_config().map(tokio_rustls::TlsConnector::from) else {
+    let Ok(connector) = tls_config(sni, config.device_identity_id.as_deref())
+        .map(tokio_rustls::TlsConnector::from)
+    else {
         return false;
     };
     tokio::time::timeout(HANDSHAKE_TIMEOUT, connector.connect(server_name, tcp))
@@ -283,6 +362,7 @@ mod tests {
             server: "example.com".into(),
             port: 443,
             sni: "example.com".into(),
+            device_identity_id: None,
         };
         let mut header = Vec::new();
         header.extend_from_slice(password_hex(&config.password).as_bytes());
@@ -296,5 +376,33 @@ mod tests {
         assert_eq!(header[58], CMD_CONNECT);
         assert_eq!(&header[59..61], &[ATYP_DOMAIN, 11]);
         assert_eq!(&header[header.len() - 2..], b"\r\n");
+    }
+
+    #[test]
+    fn tls_cache_key_separates_sni_identity_and_generation() {
+        let legacy = tls_cache_key("tahrim.haiocloud.com", None, 7);
+        let legacy_same = tls_cache_key("tahrim.haiocloud.com", None, 7);
+        assert_eq!(legacy, legacy_same);
+
+        let other_sni = tls_cache_key("cdn.example.com", None, 7);
+        assert_ne!(legacy, other_sni);
+
+        let device = tls_cache_key("tahrim.haiocloud.com", Some("p_acc"), 7);
+        assert_ne!(legacy, device);
+        let other_device = tls_cache_key("tahrim.haiocloud.com", Some("m_mem"), 7);
+        assert_ne!(device, other_device);
+
+        // A re-enrollment bumps the generation: the old certificate config
+        // must never be reused.
+        let renewed = tls_cache_key("tahrim.haiocloud.com", Some("p_acc"), 8);
+        assert_ne!(device, renewed);
+    }
+
+    #[test]
+    fn device_identities_disable_session_resumption() {
+        // A resumed TLS 1.3 session skips the client-certificate possession
+        // check, so resumption is only allowed for password-only configs.
+        assert!(resumption_enabled(None));
+        assert!(!resumption_enabled(Some("p_acc")));
     }
 }

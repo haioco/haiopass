@@ -12,6 +12,7 @@ pub mod updater;
 pub mod error;
 pub mod webview_check;
 pub mod portal;
+pub mod device;
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -32,6 +33,9 @@ pub struct AppState {
     /// Portal (OTP / HaioGate / billing) client. Additive: if initialization
     /// fails the VPN keeps working and the HaioGate tab shows a retry state.
     pub portal: Arc<portal::PortalService>,
+    /// Device identity: OS-keyring private key + enrolled certificate. Additive:
+    /// legacy password configs never touch it.
+    pub device: Arc<device::DeviceService>,
 }
 
 pub fn run() {
@@ -110,6 +114,7 @@ pub fn run() {
         interval_handle: Arc::new(RwLock::new(None)),
         health_handle: Arc::new(RwLock::new(None)),
         portal: Arc::new(portal::PortalService::new()),
+        device: Arc::new(device::DeviceService::new()),
     });
 
     let app_state = state.clone();
@@ -168,6 +173,17 @@ pub fn run() {
             portal::commands::portal_add_member,
             portal::commands::portal_rotate_member,
             portal::commands::portal_revoke_member,
+            portal::commands::portal_preview_invite,
+            portal::commands::portal_enroll_invite,
+            portal::commands::portal_primary_invite,
+            portal::commands::portal_member_invite,
+            portal::commands::portal_primary_enroll,
+            portal::commands::portal_primary_reset_device,
+            portal::commands::portal_member_reset_device,
+            portal::commands::portal_list_invites,
+            portal::commands::portal_cancel_invite,
+            portal::commands::portal_device_identity,
+            portal::commands::portal_forget_device_identity,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
@@ -180,8 +196,9 @@ pub fn run() {
 
             let enable_handle = app_handle.clone();
             let portal_state = state.clone();
+            let enable_state = state.clone();
             tauri::async_runtime::spawn(async move {
-                let config = state.config.read().await;
+                let config = enable_state.config.read().await;
                 let enabled = config.get().enabled;
                 drop(config);
                 if enabled {
@@ -205,6 +222,27 @@ pub fn run() {
                     }
                     Ok(None) => tracing::info!("App is up to date"),
                     Err(e) => tracing::warn!("Startup update check failed: {}", e),
+                }
+            });
+
+            // Load enrolled device material into the TLS registry before any
+            // dial. Failure is logged (a missing keyring entry after a reinstall
+            // is expected); the health probe then reports the tunnel down and
+            // the UI offers re-enrollment.
+            let device_state = state.clone();
+            tauri::async_runtime::spawn(async move {
+                let meta = {
+                    let config = device_state.config.read().await;
+                    config.get().device_certificate.clone()
+                };
+                if let Some(meta) = meta {
+                    if let Err(err) = device_state.device.commit(&meta) {
+                        tracing::warn!(
+                            "device identity {} could not be loaded: {}",
+                            meta.identity_id,
+                            err.code
+                        );
+                    }
                 }
             });
 

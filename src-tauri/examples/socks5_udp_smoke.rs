@@ -44,6 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         server: "127.0.0.1".into(),
         port: 18443,
         sni: "localhost".into(),
+        device_identity_id: None,
     })));
 
     let mut server = Socks5Server::new(SOCKS_PORT, shared);

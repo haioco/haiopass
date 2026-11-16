@@ -12,6 +12,7 @@
 
 import { invoke, listen } from './invoke.js';
 import { translations } from './i18n.js';
+import qrcode from 'qrcode-generator';
 
 const $ = (id) => document.getElementById(id);
 
@@ -39,6 +40,14 @@ const state = {
   pending: null,
   detail: null,
   memberCredential: null,
+  invites: [],
+  lastInvite: null,
+  invitePreview: null,
+  inviteEnrollment: null,
+  inviteBusy: false,
+  inviteArmed: false,
+  inviteQrVisible: false,
+  inviteQrTarget: '',
   screen: 'list',
   flow: null,
   selectedPackage: null,
@@ -55,6 +64,9 @@ const state = {
   homeFetchInFlight: false,
   initialised: false,
 };
+
+let activeConfigSource = 'manual';
+let activeConfigAccountId = null;
 
 /* ------------------------------------------------------------------ */
 /* Small DOM helpers                                                  */
@@ -113,6 +125,43 @@ function localizedError(error) {
       return t('hgSessionExpired');
     case 'payment_url_invalid':
       return t('hgServerError');
+    case 'invite_not_found':
+      return t('hgInviteNotFound');
+    case 'invite_expired':
+      return t('hgInviteExpired');
+    case 'invite_used':
+      return t('hgInviteUsed');
+    case 'invite_revoked':
+      return t('hgInviteRevoked');
+    case 'member_revoked':
+      return t('hgInviteMemberRevoked');
+    case 'member_not_found':
+      return t('hgInviteMemberMissing');
+    case 'not_manageable':
+      return t('hgInviteNotManageable');
+    case 'slot_taken':
+    case 'slots_full':
+      return t('hgInviteSlotFull');
+    case 'legacy_unlimited':
+      return t('hgLegacyUnlimited');
+    case 'csr_invalid':
+      return t('hgInviteCsrFailed');
+    case 'device_already_bound':
+      return t('hgInviteAlreadyBound');
+    case 'ca_unavailable':
+      return t('hgInviteCaUnavailable');
+    case 'enrollment_disabled':
+      return t('hgInviteEnrollmentDisabled');
+    case 'proxy_error':
+      return t('hgNetworkError');
+    case 'device_enrollment_required':
+      return t('hgDeviceRequired');
+    case 'device_keyring_unavailable':
+      return t('hgDeviceKeyringUnavailable');
+    case 'device_key_unavailable':
+    case 'device_identity_missing':
+    case 'device_certificate_invalid':
+      return t('hgDeviceKeyLost');
     case 'rate_limited':
       return err.retryAfter
         ? `${err.message} (${err.retryAfter}s)`
@@ -258,6 +307,242 @@ async function copyText(value, noticeKey) {
     toast(t('hgCopyFailed'), true);
   }
   return copied;
+}
+
+/* ------------------------------------------------------------------ */
+/* Guest invite enrollment                                            */
+/* ------------------------------------------------------------------ */
+
+function setInviteStatus(message, ok) {
+  const node = $('inviteStatus');
+  if (!node) return;
+  node.textContent = message || '';
+  node.className = `config-status ${ok === true ? 'ok' : ok === false ? 'bad' : ''}`;
+}
+
+function inviteLinkValue() {
+  const input = $('inviteInput');
+  return (input?.value || '').trim();
+}
+
+function qrSvg(text) {
+  // Rendered locally: no network request, no third-party QR service. The
+  // invite URL itself never leaves the process except through the user's
+  // explicit copy/scan action.
+  const qr = qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+}
+
+function renderQr(container, value) {
+  if (!container || !value) return;
+  try {
+    container.innerHTML = qrSvg(value);
+    container.classList.add('hg-qr');
+  } catch (_) {
+    container.textContent = t('hgInviteQrFailed');
+  }
+}
+
+function renderInvitePreview(preview) {
+  const box = $('invitePreview');
+  if (!box) return;
+  clear(box);
+  if (!preview) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+
+  const head = el('div', 'invite-preview-head');
+  head.appendChild(el('strong', null, preview.packageName || '—'));
+  head.appendChild(
+    el(
+      'span',
+      'hg-chip ok',
+      tf('hgInviteSlot', {
+        n: preview.memberIndex || 1,
+        total: preview.slotsTotal || 1,
+      })
+    )
+  );
+  box.appendChild(head);
+
+  const rows = [];
+  if (preview.accountNameMasked) {
+    rows.push([t('hgInviteAccount'), preview.accountNameMasked]);
+  }
+  rows.push([t('hgInviteExpires'), fmtDate(preview.expiresAt)]);
+  if (preview.trafficDisplay) {
+    rows.push([t('hgTraffic'), preview.trafficDisplay]);
+  }
+  rows.forEach(([label, value]) => {
+    const row = el('div', 'hg-panel-row');
+    row.appendChild(el('span', null, label));
+    row.appendChild(el('strong', 'mono', value));
+    box.appendChild(row);
+  });
+}
+
+function renderInviteEnrollment(enrollment) {
+  const box = $('invitePreview');
+  if (!box || !enrollment) return;
+  clear(box);
+  box.classList.remove('hidden');
+
+  const success = el('div', 'invite-success');
+  success.appendChild(el('strong', null, t('hgInviteSuccess')));
+  if (enrollment.packageName) {
+    success.appendChild(el('small', null, enrollment.packageName));
+  }
+  if (enrollment.deviceName) {
+    const row = el('div', 'hg-panel-row');
+    row.appendChild(el('span', null, t('hgInviteDeviceName')));
+    row.appendChild(el('strong', null, enrollment.deviceName));
+    success.appendChild(row);
+  }
+  if (enrollment.certExpiresAt) {
+    const row = el('div', 'hg-panel-row');
+    row.appendChild(el('span', null, t('hgDeviceCertExpiry')));
+    row.appendChild(el('strong', null, fmtDate(enrollment.certExpiresAt)));
+    success.appendChild(row);
+  }
+
+  const actions = el('div', 'hg-action-row');
+  actions.appendChild(
+    button(t('hgInviteConnect'), 'btn primary sm', async () => {
+      if (typeof window.appEnableProxy !== 'function') return;
+      try {
+        if (typeof window.appLoading === 'function') {
+          window.appLoading(true, t('enabling'));
+        }
+        await window.appEnableProxy();
+        if (typeof window.appConfigChanged === 'function') {
+          await window.appConfigChanged({
+            source: 'haiogate',
+            accountId: enrollment.accountId,
+          });
+        }
+      } catch (error) {
+        toast(localizedError(error), true);
+      } finally {
+        if (typeof window.appLoading === 'function') window.appLoading(false);
+      }
+    })
+  );
+  actions.appendChild(
+    button(t('hgInviteLater'), 'btn ghost sm', () => {
+      if (typeof window.appShowDashboard === 'function') {
+        window.appShowDashboard();
+      }
+    })
+  );
+  success.appendChild(actions);
+  box.appendChild(success);
+}
+
+async function previewInvite() {
+  if (state.inviteBusy) return;
+  const link = inviteLinkValue();
+  if (!link) {
+    setInviteStatus(t('hgInviteLinkRequired'), false);
+    $('inviteInput')?.focus();
+    return;
+  }
+
+  state.inviteBusy = true;
+  state.inviteEnrollment = null;
+  setBusy(true, t('hgInvitePreview'));
+  setInviteStatus('', null);
+  try {
+    const preview = await invoke('portal_preview_invite', { token: link });
+    state.invitePreview = preview;
+    state.inviteEnrollment = null;
+    state.inviteArmed = false;
+    renderInvitePreview(preview);
+    setInviteStatus(t('hgInvitePreviewOk'), true);
+    const enrollBtn = $('inviteEnrollBtn');
+    if (enrollBtn) enrollBtn.textContent = t('hgInviteEnroll');
+  } catch (error) {
+    state.invitePreview = null;
+    renderInvitePreview(null);
+    setInviteStatus(localizedError(error), false);
+  } finally {
+    state.inviteBusy = false;
+    setBusy(false);
+  }
+}
+
+async function enrollInvite() {
+  if (state.inviteBusy) return;
+  const link = inviteLinkValue();
+  if (!link) {
+    setInviteStatus(t('hgInviteLinkRequired'), false);
+    $('inviteInput')?.focus();
+    return;
+  }
+
+  // Replacing an existing config is destructive for the current device key.
+  if (window.appHasConfig && !state.inviteArmed) {
+    state.inviteArmed = true;
+    const enrollBtn = $('inviteEnrollBtn');
+    if (enrollBtn) enrollBtn.textContent = t('hgInviteReplaceConfirm');
+    setInviteStatus(t('hgInviteReplaceWarn'), false);
+    setTimeout(() => {
+      state.inviteArmed = false;
+      const buttonNode = $('inviteEnrollBtn');
+      if (buttonNode) buttonNode.textContent = t('hgInviteEnroll');
+    }, 5000);
+    return;
+  }
+  state.inviteArmed = false;
+
+  const deviceName = ($('inviteDeviceName')?.value || '').trim();
+  state.inviteBusy = true;
+  setBusy(true, t('hgInviteEnrolling'));
+  setInviteStatus(t('hgInviteEnrolling'), null);
+  const enrollBtn = $('inviteEnrollBtn');
+  if (enrollBtn) enrollBtn.disabled = true;
+
+  try {
+    const res = await invoke('portal_enroll_invite', {
+      token: link,
+      deviceName: deviceName || null,
+    });
+    const enrollment = res?.enrollment || null;
+    state.inviteEnrollment = enrollment;
+    state.invitePreview = null;
+    if (enrollment) {
+      renderInviteEnrollment(enrollment);
+      setInviteStatus(t('hgInviteSuccess'), true);
+    }
+    // Clear the pasted token from the DOM once it has been consumed.
+    const input = $('inviteInput');
+    if (input) input.value = '';
+    // Reload the app state (config, badge, Home) and then re-show the
+    // onboarding screen so the success panel stays visible until the user
+    // chooses Connect or Later. The back button appears now that a config is
+    // saved.
+    if (typeof window.appConfigChanged === 'function') {
+      await window.appConfigChanged({
+        source: 'haiogate',
+        accountId: res?.accountId || enrollment?.accountId || null,
+      });
+    }
+    if (typeof window.appShowOnboarding === 'function') {
+      window.appShowOnboarding();
+    }
+  } catch (error) {
+    setInviteStatus(localizedError(error), false);
+  } finally {
+    state.inviteBusy = false;
+    setBusy(false);
+    if (enrollBtn) {
+      enrollBtn.disabled = false;
+      enrollBtn.textContent = t('hgInviteEnroll');
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -554,8 +839,10 @@ function changeMobile() {
 }
 
 async function logout() {
+  let deviceCleared = false;
   try {
-    await invoke('portal_logout');
+    const res = await invoke('portal_logout');
+    deviceCleared = Boolean(res?.deviceCleared);
   } catch (_) {
     // Clearing local state is still correct if the network call fails.
   }
@@ -568,12 +855,19 @@ async function logout() {
   state.accounts = [];
   state.packages = [];
   state.detail = null;
+  state.invites = [];
+  state.lastInvite = null;
   state.screen = 'loggedout';
   state.memberCredential = null;
   state.logoutArmed = false;
   closeAccountModal();
   render();
-  toast(t('hgLogoutKeepsConfig'));
+  if (deviceCleared && typeof window.appConfigChanged === 'function') {
+    toast(t('hgDeviceClearedOnLogout'));
+    await window.appConfigChanged({ source: 'manual' });
+  } else {
+    toast(t('hgLogoutKeepsConfig'));
+  }
   if (typeof window.appRefreshHomeCard === 'function') window.appRefreshHomeCard();
 }
 
@@ -651,13 +945,18 @@ function statusChip(account) {
 }
 
 function accountCard(account) {
-  const card = el('article', 'hg-card');
+  const isActive =
+    activeConfigSource === 'haiogate' && activeConfigAccountId === account.id;
+  const card = el('article', isActive ? 'hg-card active' : 'hg-card');
 
   const head = el('div', 'hg-card-head');
   const titles = el('div', 'hg-card-titles');
   titles.appendChild(el('strong', 'hg-card-title', account.packageName || '—'));
   titles.appendChild(account.username ? el('small', 'hg-card-user mono', account.username) : el('small'));
   head.appendChild(titles);
+  if (isActive) {
+    head.appendChild(el('span', 'hg-chip ok', t('hgInUse')));
+  }
   head.appendChild(statusChip(account));
   if (account.isLegacyUnlimited) {
     head.appendChild(el('span', 'hg-chip legacy', t('hgLegacyBadge')));
@@ -689,12 +988,34 @@ function accountCard(account) {
   if (account.includedUsers) {
     chips.appendChild(el('span', 'hg-chip', tf('hgUsersCount', { n: account.includedUsers })));
   }
+  if (account.deviceLock) {
+    chips.appendChild(
+      el(
+        'span',
+        'hg-chip',
+        account.deviceName
+          ? tf('hgDeviceLine', { name: account.deviceName })
+          : t('hgDeviceLocked')
+      )
+    );
+  }
   if (chips.childElementCount > 0) card.appendChild(chips);
 
   const actions = el('div', 'hg-card-actions');
   actions.appendChild(
     button(t('hgDetails'), 'btn ghost sm', () => openDetail(account.id))
   );
+  if (isActive) {
+    actions.appendChild(el('span', 'hg-chip ok', t('hgInUse')));
+  } else if (account.category === 'active') {
+    actions.appendChild(
+      button(
+        account.deviceLock ? t('hgDeviceEnroll') : t('hgApply'),
+        'btn ghost sm',
+        () => applyConfig(account.id, actions)
+      )
+    );
+  }
   if (account.category !== 'support') {
     actions.appendChild(
       button(t('hgRenew'), 'btn primary sm', () =>
@@ -884,6 +1205,8 @@ async function openDetail(accountId) {
   state.screen = 'detail';
   state.detail = null;
   state.memberCredential = null;
+  state.invites = [];
+  state.lastInvite = null;
   showScreen('detail');
   const body = $('hgDetailBody');
   if (body) body.replaceChildren(el('div', 'hg-loading', t('hgRestoring')));
@@ -891,9 +1214,12 @@ async function openDetail(accountId) {
   if (actions) clear(actions);
   const members = $('hgDetailMembers');
   if (members) clear(members);
+  const invites = $('hgDetailInvites');
+  if (invites) clear(invites);
 
   try {
     state.detail = await invoke('portal_account_detail', { accountId });
+    state.invites = (await loadInvites(accountId, state.detail)) || [];
     render();
   } catch (error) {
     handleSessionError(error);
@@ -908,16 +1234,44 @@ async function openDetail(accountId) {
   }
 }
 
+async function loadInvites(accountId, detail) {
+  if (!detail || !detail.deviceLock) return [];
+  try {
+    const invites = await invoke('portal_list_invites', { accountId });
+    return Array.isArray(invites) ? invites : [];
+  } catch (_) {
+    // The device list is optional; the account detail still renders.
+    return null;
+  }
+}
+
 async function refreshDetail() {
   const id = state.detail?.id;
   if (!id) return;
   try {
     state.detail = await invoke('portal_account_detail', { accountId: id });
+    const invites = await loadInvites(id, state.detail);
+    if (invites) {
+      state.invites = invites;
+      pruneLastInvite();
+    }
     renderDetail();
   } catch (error) {
     handleSessionError(error);
     toast(localizedError(error), true);
   }
+}
+
+/// A one-time invite that is no longer pending was consumed or revoked; the
+/// full link cannot be used again, so stop offering it.
+function pruneLastInvite() {
+  if (!state.lastInvite) return;
+  const still = (state.invites || []).some(
+    (invite) =>
+      invite.expiresAt === state.lastInvite.expiresAt &&
+      (invite.memberId || null) === (state.lastInvite.memberId || null)
+  );
+  if (!still) state.lastInvite = null;
 }
 
 function detailId() {
@@ -1003,62 +1357,74 @@ function renderDetail() {
   body.appendChild(reserveCard);
 
   /* Credentials */
-  const credCard = el('div', 'card hg-detail-card');
-  credCard.appendChild(el('span', 'group-label', t('hgCredentials')));
+  if (detail.deviceLock) {
+    renderDeviceCard(body, detail);
+  } else {
+    const credCard = el('div', 'card hg-detail-card');
+    credCard.appendChild(el('span', 'group-label', t('hgCredentials')));
 
-  const userRow = el('div', 'hg-panel-row');
-  userRow.appendChild(el('span', null, t('hgUsername')));
-  const userValue = el('strong', 'mono', detail.username || '—');
-  userRow.appendChild(userValue);
-  userRow.appendChild(
-    button(t('hgCopy'), 'btn ghost sm', () =>
-      copyText(detail.username, 'hgCopied')
-    )
-  );
-  credCard.appendChild(userRow);
+    const userRow = el('div', 'hg-panel-row');
+    userRow.appendChild(el('span', null, t('hgUsername')));
+    const userValue = el('strong', 'mono', detail.username || '—');
+    userRow.appendChild(userValue);
+    userRow.appendChild(
+      button(t('hgCopy'), 'btn ghost sm', () =>
+        copyText(detail.username, 'hgCopied')
+      )
+    );
+    credCard.appendChild(userRow);
 
-  const passRow = el('div', 'hg-panel-row');
-  passRow.appendChild(el('span', null, t('hgPassword')));
-  let revealed = false;
-  const passValue = el('strong', 'mono', '••••••••');
-  passRow.appendChild(passValue);
-  const revealBtn = button(t('hgReveal'), 'btn ghost sm', () => {
-    revealed = !revealed;
-    passValue.textContent = revealed ? detail.password || '—' : '••••••••';
-    revealBtn.textContent = revealed ? t('hgHide') : t('hgReveal');
-    if (revealed) {
-      clearTimeout(revealBtn._hideTimer);
-      revealBtn._hideTimer = setTimeout(() => {
-        revealed = false;
-        passValue.textContent = '••••••••';
-        revealBtn.textContent = t('hgReveal');
-      }, 60000);
-    }
-  });
-  passRow.appendChild(revealBtn);
-  passRow.appendChild(
-    button(t('hgCopy'), 'btn ghost sm', () => copyText(detail.password, 'hgCopyWarning'))
-  );
-  credCard.appendChild(passRow);
+    const passRow = el('div', 'hg-panel-row');
+    passRow.appendChild(el('span', null, t('hgPassword')));
+    let revealed = false;
+    const passValue = el('strong', 'mono', '••••••••');
+    passRow.appendChild(passValue);
+    const revealBtn = button(t('hgReveal'), 'btn ghost sm', () => {
+      revealed = !revealed;
+      passValue.textContent = revealed ? detail.password || '—' : '••••••••';
+      revealBtn.textContent = revealed ? t('hgHide') : t('hgReveal');
+      if (revealed) {
+        clearTimeout(revealBtn._hideTimer);
+        revealBtn._hideTimer = setTimeout(() => {
+          revealed = false;
+          passValue.textContent = '••••••••';
+          revealBtn.textContent = t('hgReveal');
+        }, 60000);
+      }
+    });
+    passRow.appendChild(revealBtn);
+    passRow.appendChild(
+      button(t('hgCopy'), 'btn ghost sm', () => copyText(detail.password, 'hgCopyWarning'))
+    );
+    credCard.appendChild(passRow);
 
-  const linkRow = el('div', 'hg-panel-row');
-  linkRow.appendChild(el('span', null, t('hgCopyLink')));
-  linkRow.appendChild(el('strong', 'mono hg-link-mask', maskLink(detail.trojanUrl)));
-  linkRow.appendChild(
-    button(t('hgCopy'), 'btn ghost sm', () =>
-      copyText(detail.trojanUrl, 'hgCopyLinkWarn')
-    )
-  );
-  credCard.appendChild(linkRow);
-  body.appendChild(credCard);
+    const linkRow = el('div', 'hg-panel-row');
+    linkRow.appendChild(el('span', null, t('hgCopyLink')));
+    linkRow.appendChild(el('strong', 'mono hg-link-mask', maskLink(detail.trojanUrl)));
+    linkRow.appendChild(
+      button(t('hgCopy'), 'btn ghost sm', () =>
+        copyText(detail.trojanUrl, 'hgCopyLinkWarn')
+      )
+    );
+    credCard.appendChild(linkRow);
+    body.appendChild(credCard);
+  }
 
   /* Actions */
   const actions = $('hgDetailActions');
   if (actions) {
     clear(actions);
-    actions.appendChild(
-      button(t('hgApply'), 'btn primary block', () => applyConfig(detailId(), actions))
-    );
+    if (detail.deviceLock) {
+      actions.appendChild(
+        button(t('hgDeviceEnroll'), 'btn primary block', () =>
+          enrollPrimary(detailId(), actions)
+        )
+      );
+    } else {
+      actions.appendChild(
+        button(t('hgApply'), 'btn primary block', () => applyConfig(detailId(), actions))
+      );
+    }
     const row = el('div', 'hg-action-row');
     if (detail.category !== 'support') {
       row.appendChild(
@@ -1072,19 +1438,72 @@ function renderDetail() {
   }
 
   renderMembers();
+  renderInvites();
+}
+
+/// Device-lock credentials are certificate-only: show the bound device and the
+/// enrollment state, never a password or a bearer link.
+function renderDeviceCard(body, detail) {
+  const card = el('div', 'card hg-detail-card');
+  card.appendChild(el('span', 'group-label', t('hgDeviceSection')));
+
+  if (detail.deviceName) {
+    const nameRow = el('div', 'hg-panel-row');
+    nameRow.appendChild(el('span', null, t('hgInviteDeviceName')));
+    nameRow.appendChild(el('strong', null, detail.deviceName));
+    card.appendChild(nameRow);
+
+    if (detail.devicePlatform) {
+      const platformRow = el('div', 'hg-panel-row');
+      platformRow.appendChild(el('span', null, t('hgDevicePlatform')));
+      platformRow.appendChild(el('strong', null, detail.devicePlatform));
+      card.appendChild(platformRow);
+    }
+    if (detail.deviceBoundAt) {
+      const boundRow = el('div', 'hg-panel-row');
+      boundRow.appendChild(el('span', null, t('hgDeviceBoundAt')));
+      boundRow.appendChild(el('strong', null, fmtDate(detail.deviceBoundAt)));
+      card.appendChild(boundRow);
+    }
+    if (detail.deviceCertExpiresAt) {
+      const certRow = el('div', 'hg-panel-row');
+      certRow.appendChild(el('span', null, t('hgDeviceCertExpiry')));
+      certRow.appendChild(el('strong', null, fmtDate(detail.deviceCertExpiresAt)));
+      card.appendChild(certRow);
+    }
+  } else {
+    card.appendChild(el('small', 'hg-meta-expiry', t('hgDeviceNotBound')));
+  }
+
+  card.appendChild(el('small', 'hg-meta-expiry', t('hgDeviceLockedNote')));
+  body.appendChild(card);
 }
 
 async function applyConfig(accountId, container) {
   if (!accountId) return;
+  // A locked credential cannot be applied from a URL: enrollment is the only
+  // path that installs the certificate and the current password.
+  const locked =
+    (state.detail?.id === accountId && state.detail?.deviceLock) ||
+    state.accounts.find((account) => account.id === accountId)?.deviceLock;
+  if (locked) {
+    await enrollPrimary(accountId, container);
+    return;
+  }
+
   const target = container ? container.querySelector('.btn.primary') : null;
   if (target) target.disabled = true;
   setBusy(true, t('hgApply'));
   try {
     await invoke('portal_apply_config', { accountId });
+    activeConfigSource = 'haiogate';
+    activeConfigAccountId = accountId;
     toast(t('hgApplySuccess'));
     if (typeof window.appConfigChanged === 'function') {
       await window.appConfigChanged({ source: 'haiogate', accountId });
     }
+    if (state.screen === 'list') renderList();
+    if (state.screen === 'detail') renderDetail();
   } catch (error) {
     toast(localizedError(error), true);
   } finally {
@@ -1126,6 +1545,8 @@ function memberStatusLabel(status) {
   }
 }
 
+/// Legacy credential box. Device-lock members never render this: they have no
+/// reusable password, only a single-use invite and a certificate.
 function memberCredentialBox(member) {
   const box = el('div', 'hg-cred-box');
   box.appendChild(el('strong', null, member.displayName || member.username || ''));
@@ -1166,6 +1587,23 @@ function memberCredentialBox(member) {
   return box;
 }
 
+function deviceMetaLine(device) {
+  if (!device) return '';
+  const parts = [];
+  if (device.name) parts.push(tf('hgDeviceLine', { name: device.name }));
+  if (device.platform) parts.push(device.platform);
+  if (device.fingerprintPrefix) {
+    parts.push(`#${device.fingerprintPrefix.slice(0, 8)}`);
+  }
+  if (device.lastSeenAt) {
+    parts.push(tf('hgLastSeen', { time: fmtDate(device.lastSeenAt) }));
+  }
+  if (device.certExpiresAt) {
+    parts.push(tf('hgCertExpiry', { time: fmtDate(device.certExpiresAt) }));
+  }
+  return parts.join(' · ');
+}
+
 function renderMembers() {
   const container = $('hgDetailMembers');
   const detail = state.detail;
@@ -1198,18 +1636,47 @@ function renderMembers() {
     return;
   }
 
+  const locked = Boolean(detail.deviceLock);
+
   /* Primary */
   const primary = el('div', 'hg-member-row');
   const primaryCopy = el('div', 'hg-member-copy');
   primaryCopy.appendChild(el('strong', null, t('hgPrimary')));
   primaryCopy.appendChild(el('small', 'mono', detail.username || ''));
+  if (locked && detail.deviceName) {
+    primaryCopy.appendChild(
+      el(
+        'small',
+        'hg-device-line',
+        deviceMetaLine({
+          name: detail.deviceName,
+          platform: detail.devicePlatform,
+          certExpiresAt: detail.deviceCertExpiresAt,
+        })
+      )
+    );
+  }
   primary.appendChild(primaryCopy);
   primary.appendChild(el('span', 'hg-chip ok', t('hgMemberStatusActive')));
-  primary.appendChild(
-    button(t('hgCopy'), 'btn ghost sm', () =>
-      copyText(detail.trojanUrl, 'hgCopyLinkWarn')
-    )
-  );
+
+  if (locked) {
+    if (detail.deviceName) {
+      const reset = button(t('hgResetDevice'), 'btn ghost sm', () =>
+        armConfirm(reset, t('hgDeviceResetConfirm'), () => resetPrimaryDevice())
+      );
+      primary.appendChild(reset);
+    } else {
+      primary.appendChild(
+        button(t('hgPrimaryInvite'), 'btn ghost sm', () => createPrimaryInvite())
+      );
+    }
+  } else {
+    primary.appendChild(
+      button(t('hgCopy'), 'btn ghost sm', () =>
+        copyText(detail.trojanUrl, 'hgCopyLinkWarn')
+      )
+    );
+  }
   container.appendChild(primary);
 
   /* Members */
@@ -1222,24 +1689,40 @@ function renderMembers() {
     const copy = el('div', 'hg-member-copy');
     copy.appendChild(el('strong', null, member.displayName || member.username));
     copy.appendChild(el('small', 'mono', member.username));
+    if (locked && member.device) {
+      copy.appendChild(el('small', 'hg-device-line', deviceMetaLine(member.device)));
+    }
     row.appendChild(copy);
     const isActive = member.status === 'active' || member.status === 'pending';
     row.appendChild(
       el('span', `hg-chip ${isActive ? 'ok' : ''}`, memberStatusLabel(member.status))
     );
 
-    if (isActive) {
+    if (isActive && locked) {
+      if (member.device) {
+        const reset = button(t('hgResetDevice'), 'btn ghost sm', () =>
+          armConfirm(reset, t('hgDeviceResetConfirm'), () =>
+            resetMemberDevice(member)
+          )
+        );
+        row.appendChild(reset);
+      } else {
+        row.appendChild(
+          button(t('hgMemberInvite'), 'btn ghost sm', () =>
+            createMemberInvite(member)
+          )
+        );
+      }
+    } else if (isActive) {
       const rotate = button(t('hgMemberRotate'), 'btn ghost sm', () =>
-        armConfirm(rotate, t('hgRotateWarn'), () =>
-          rotateMember(member)
-        )
+        armConfirm(rotate, t('hgRotateWarn'), () => rotateMember(member))
       );
       row.appendChild(rotate);
+    }
 
+    if (isActive) {
       const revoke = button(t('hgMemberRevoke'), 'btn danger sm', () =>
-        armConfirm(revoke, t('hgRevokeWarn'), () =>
-          revokeMember(member)
-        )
+        armConfirm(revoke, t('hgRevokeWarn'), () => revokeMember(member))
       );
       row.appendChild(revoke);
     }
@@ -1270,9 +1753,252 @@ function renderMembers() {
     form.appendChild(mobile);
     form.appendChild(add);
     container.appendChild(form);
-    container.appendChild(el('small', 'hg-meta-expiry', t('hgMemberLoginNote')));
+    container.appendChild(
+      el(
+        'small',
+        'hg-meta-expiry',
+        locked ? t('hgMemberInviteNote') : t('hgMemberLoginNote')
+      )
+    );
   } else if (canAdd) {
     container.appendChild(el('small', 'hg-meta-expiry', t('hgMemberLimit')));
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Owner invites                                                      */
+/* ------------------------------------------------------------------ */
+
+function renderCreatedInvite(invite) {
+  const box = el('div', 'hg-invite-box');
+  box.appendChild(el('strong', null, t('hgInviteCreated')));
+  box.appendChild(el('small', 'hg-cred-warn', t('hgInviteCreatedWarn')));
+
+  const row = el('div', 'hg-panel-row');
+  const urlInput = el('input', 'text-input mono hg-invite-url');
+  urlInput.type = 'text';
+  urlInput.readOnly = true;
+  urlInput.value = invite.inviteUrl || invite.deepLink || '';
+  urlInput.dir = 'ltr';
+  row.appendChild(urlInput);
+  row.appendChild(
+    button(t('hgCopy'), 'btn ghost sm', () =>
+      copyText(invite.inviteUrl || invite.deepLink, 'hgInviteLinkCopied')
+    )
+  );
+  box.appendChild(row);
+
+  if (invite.expiresAt) {
+    const expiry = el('div', 'hg-panel-row');
+    expiry.appendChild(el('span', null, t('hgInviteExpires')));
+    expiry.appendChild(el('strong', null, fmtDate(invite.expiresAt)));
+    box.appendChild(expiry);
+  }
+
+  const qrWrap = el('div', 'hg-qr-wrap hidden');
+  const qrBtn = button(t('hgInviteShowQr'), 'btn ghost sm', () => {
+    const hidden = qrWrap.classList.contains('hidden');
+    if (hidden && qrWrap.dataset.ready !== '1') {
+      renderQr(qrWrap, invite.inviteUrl || invite.deepLink);
+      qrWrap.dataset.ready = '1';
+    }
+    qrWrap.classList.toggle('hidden', !hidden);
+    qrBtn.textContent = hidden ? t('hgInviteHideQr') : t('hgInviteShowQr');
+  });
+  const actions = el('div', 'hg-action-row');
+  actions.appendChild(qrBtn);
+  box.appendChild(actions);
+  box.appendChild(qrWrap);
+  return box;
+}
+
+function renderPendingInvites() {
+  const container = $('hgDetailInvites');
+  const detail = state.detail;
+  if (!container || !detail) return;
+  clear(container);
+  if (!detail.deviceLock) return;
+
+  const invites = Array.isArray(state.invites) ? state.invites : [];
+  if (state.lastInvite) {
+    container.appendChild(renderCreatedInvite(state.lastInvite));
+  }
+  // The created invite is also in the server list; showing it twice is noise.
+  const last = state.lastInvite;
+  const pending = last
+    ? invites.filter(
+        (invite) =>
+          !(
+            invite.expiresAt === last.expiresAt &&
+            (invite.memberId || null) === (last.memberId || null)
+          )
+      )
+    : invites;
+  if (pending.length === 0) return;
+
+  const head = el('div', 'hg-section-head');
+  head.appendChild(el('span', 'section-title', t('hgPendingInvites')));
+  head.appendChild(el('span', 'count-pill', String(pending.length)));
+  container.appendChild(head);
+
+  pending.forEach((invite) => {
+    const row = el('div', 'hg-invite-row');
+    const copy = el('div', 'hg-member-copy');
+    copy.appendChild(
+      el('strong', null, invite.memberName || t('hgPrimary'))
+    );
+    const meta = [];
+    if (invite.tokenPrefix) meta.push(invite.tokenPrefix);
+    if (invite.expiresAt) {
+      meta.push(tf('hgInviteExpiresAt', { time: fmtDate(invite.expiresAt) }));
+    }
+    copy.appendChild(el('small', 'mono', meta.join(' · ')));
+    row.appendChild(copy);
+    row.appendChild(
+      el(
+        'span',
+        'hg-chip',
+        invite.status === 'pending'
+          ? t('hgInvitePending')
+          : invite.status || t('hgInvitePending')
+      )
+    );
+    const cancel = button(t('hgInviteCancel'), 'btn ghost sm', () =>
+      armConfirm(cancel, t('hgInviteCancelConfirm'), () => cancelInvite(invite))
+    );
+    row.appendChild(cancel);
+    container.appendChild(row);
+  });
+}
+
+function renderInvites() {
+  renderPendingInvites();
+}
+
+async function createMemberInvite(member) {
+  const id = detailId();
+  if (!id) return;
+  setBusy(true, t('hgMemberInvite'));
+  try {
+    const invite = await invoke('portal_member_invite', {
+      accountId: id,
+      memberId: member.id,
+    });
+    state.lastInvite = invite;
+    toast(t('hgInviteCreated'));
+    await refreshDetail();
+  } catch (error) {
+    handleSessionError(error);
+    toast(localizedError(error), true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function createPrimaryInvite() {
+  const id = detailId();
+  if (!id) return;
+  setBusy(true, t('hgPrimaryInvite'));
+  try {
+    const invite = await invoke('portal_primary_invite', { accountId: id });
+    state.lastInvite = invite;
+    toast(t('hgInviteCreated'));
+    await refreshDetail();
+  } catch (error) {
+    handleSessionError(error);
+    toast(localizedError(error), true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function cancelInvite(invite) {
+  const id = detailId();
+  if (!id || !invite?.id) return;
+  setBusy(true, t('hgInviteCancel'));
+  try {
+    await invoke('portal_cancel_invite', { accountId: id, inviteId: invite.id });
+    state.lastInvite = null;
+    toast(t('hgInviteCancelled'));
+    await refreshDetail();
+  } catch (error) {
+    handleSessionError(error);
+    toast(localizedError(error), true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Device reset / enrollment                                          */
+/* ------------------------------------------------------------------ */
+
+async function resetMemberDevice(member) {
+  const id = detailId();
+  if (!id) return;
+  setBusy(true, t('hgResetDevice'));
+  try {
+    const res = await invoke('portal_member_reset_device', {
+      accountId: id,
+      memberId: member.id,
+      reason: 'owner reset',
+    });
+    state.lastInvite = null;
+    toast(t('hgDeviceReset'));
+    if (res?.deviceCleared && typeof window.appConfigChanged === 'function') {
+      await window.appConfigChanged({ source: 'manual' });
+    }
+    await refreshDetail();
+  } catch (error) {
+    handleSessionError(error);
+    toast(localizedError(error), true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function resetPrimaryDevice() {
+  const id = detailId();
+  if (!id) return;
+  setBusy(true, t('hgResetDevice'));
+  try {
+    const res = await invoke('portal_primary_reset_device', {
+      accountId: id,
+      reason: 'owner reset',
+    });
+    state.lastInvite = null;
+    state.memberCredential = null;
+    toast(t('hgDeviceReset'));
+    if (res?.deviceCleared && typeof window.appConfigChanged === 'function') {
+      await window.appConfigChanged({ source: 'manual' });
+    }
+    await refreshDetail();
+  } catch (error) {
+    handleSessionError(error);
+    toast(localizedError(error), true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function enrollPrimary(accountId, container) {
+  if (!accountId) return;
+  const target = container ? container.querySelector('.btn.primary') : null;
+  if (target) target.disabled = true;
+  setBusy(true, t('hgDeviceEnrolling'));
+  try {
+    await invoke('portal_primary_enroll', { accountId });
+    toast(t('hgDeviceEnrolled'));
+    if (typeof window.appConfigChanged === 'function') {
+      await window.appConfigChanged({ source: 'haiogate', accountId });
+    }
+    await refreshDetail();
+  } catch (error) {
+    handleSessionError(error);
+    toast(localizedError(error), true);
+  } finally {
+    setBusy(false);
+    if (target) target.disabled = false;
   }
 }
 
@@ -1307,12 +2033,19 @@ async function addMember(nameInput, mobileInput, addButton) {
   addButton.disabled = true;
   setBusy(true, t('hgMemberAdd'));
   try {
-    const member = await invoke('portal_add_member', {
+    const created = await invoke('portal_add_member', {
       accountId: id,
       displayName,
       mobile: normalizeDigits(mobileInput.value) || null,
+      issueInvite: Boolean(state.detail?.deviceLock),
     });
-    state.memberCredential = member;
+    if (created?.inviteRequired) {
+      state.memberCredential = null;
+      state.lastInvite = created.invite || null;
+    } else {
+      state.memberCredential = created?.member || created;
+      state.lastInvite = null;
+    }
     toast(t('hgMemberAdded'));
     await refreshDetail();
   } catch (error) {
@@ -1333,7 +2066,12 @@ async function rotateMember(member) {
       accountId: id,
       memberId: member.id,
     });
-    state.memberCredential = rotated;
+    if (rotated?.inviteRequired) {
+      state.memberCredential = null;
+      state.lastInvite = rotated.invite || null;
+    } else {
+      state.memberCredential = rotated?.member || rotated;
+    }
     toast(t('hgMemberRotated'));
     await refreshDetail();
   } catch (error) {
@@ -1349,9 +2087,16 @@ async function revokeMember(member) {
   if (!id) return;
   setBusy(true, t('hgMemberRevoke'));
   try {
-    await invoke('portal_revoke_member', { accountId: id, memberId: member.id });
+    const res = await invoke('portal_revoke_member', {
+      accountId: id,
+      memberId: member.id,
+    });
     state.memberCredential = null;
+    state.lastInvite = null;
     toast(t('hgMemberRevoked'));
+    if (res?.deviceCleared && typeof window.appConfigChanged === 'function') {
+      await window.appConfigChanged({ source: 'manual' });
+    }
     await refreshDetail();
   } catch (error) {
     handleSessionError(error);
@@ -1799,7 +2544,9 @@ function closeAccountModal() {
 async function renderHomeCard(configSource, accountId) {
   const card = $('homeHaioGateCard');
   if (!card) return;
-  if (configSource !== 'haiogate' || !accountId) {
+  // A guest device has no portal account to summarize; the hero config badge
+  // already shows that a device identity is applied.
+  if (!state.session.loggedIn || configSource !== 'haiogate' || !accountId) {
     card.classList.add('hidden');
     return;
   }
@@ -1876,6 +2623,15 @@ function bindEvents() {
     openLogin();
   });
 
+  $('invitePreviewBtn')?.addEventListener('click', previewInvite);
+  $('inviteEnrollBtn')?.addEventListener('click', enrollInvite);
+  $('inviteInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      previewInvite();
+    }
+  });
+
   $('hgLoginBtn')?.addEventListener('click', openLogin);
   $('hgPlansBtn')?.addEventListener('click', () => {
     if (!state.session.loggedIn) {
@@ -1884,6 +2640,23 @@ function bindEvents() {
       return;
     }
     openPackages({ kind: 'buy' });
+  });
+
+  $('hgInviteGuestBtn')?.addEventListener('click', () => {
+    // Reopening the invite panel starts a fresh enrollment; a previous
+    // success panel (already-consumed token) must not linger.
+    state.invitePreview = null;
+    state.inviteEnrollment = null;
+    const box = $('invitePreview');
+    if (box) {
+      clear(box);
+      box.classList.add('hidden');
+    }
+    setInviteStatus('', null);
+    if (typeof window.appShowOnboarding === 'function') {
+      window.appShowOnboarding();
+    }
+    setTimeout(() => $('inviteInput')?.focus(), 80);
   });
 
   $('hgOtpSubmit')?.addEventListener('click', submitLogin);
@@ -1945,6 +2718,8 @@ function bindEvents() {
     state.screen = 'list';
     state.detail = null;
     state.memberCredential = null;
+    state.invites = [];
+    state.lastInvite = null;
     render();
   });
   $('hgPackagesBack')?.addEventListener('click', () => {
@@ -2023,11 +2798,30 @@ function bindEvents() {
   window.addEventListener('app:language', () => {
     renderChrome();
     renderAccountPanel();
+    if (state.invitePreview && !state.inviteEnrollment) {
+      renderInvitePreview(state.invitePreview);
+    } else if (state.inviteEnrollment) {
+      renderInviteEnrollment(state.inviteEnrollment);
+    }
     if (state.session.loggedIn) {
       if (state.screen === 'detail' && state.detail) renderDetail();
       else if (state.screen === 'packages') renderPackages();
       else renderList();
     }
+  });
+
+  // A manual save, delete or "forget device" invalidates any success panel
+  // left over from a previous enrollment.
+  window.addEventListener('app:config-cleared', () => {
+    state.invitePreview = null;
+    state.inviteEnrollment = null;
+    state.lastInvite = null;
+    const box = $('invitePreview');
+    if (box) {
+      clear(box);
+      box.classList.add('hidden');
+    }
+    setInviteStatus('', null);
   });
 
   listen('portal:session', (view) => {
@@ -2069,6 +2863,8 @@ function applySession(view) {
     state.accounts = [];
     state.packages = [];
     state.detail = null;
+    state.invites = [];
+    state.lastInvite = null;
     if (state.screen === 'detail') state.screen = 'list';
   }
 
@@ -2146,6 +2942,14 @@ export function homeCard(configSource, accountId) {
   renderHomeCard(configSource, accountId);
 }
 
+export function setActiveConfig(configSource, accountId) {
+  activeConfigSource = configSource || 'manual';
+  activeConfigAccountId = accountId || null;
+  if (!state.initialised || !state.session.loggedIn) return;
+  if (state.screen === 'list') renderList();
+  if (state.screen === 'detail') renderDetail();
+}
+
 window.portalModule = {
   init: initPortal,
   onTabEnter,
@@ -2154,4 +2958,5 @@ window.portalModule = {
   openLogin: openLoginScreen,
   openBuyFlow,
   homeCard,
+  setActiveConfig,
 };

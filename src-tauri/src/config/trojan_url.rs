@@ -34,6 +34,8 @@ pub fn parse_trojan_url(uri: &str) -> Option<TrojanConfig> {
         server,
         port,
         sni,
+        // A pasted link never carries device-lock material; enrollment sets it.
+        device_identity_id: None,
     })
 }
 

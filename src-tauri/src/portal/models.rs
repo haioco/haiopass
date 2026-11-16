@@ -208,6 +208,24 @@ pub struct ReserveApi {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
+pub struct MemberDeviceApi {
+    #[serde(default, deserialize_with = "de_string")]
+    pub name: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub platform: String,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub fingerprint_prefix: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub bound_at: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub last_seen_at: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub cert_expires_at: Option<String>,
+    #[serde(default, deserialize_with = "de_string")]
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct MemberApi {
     #[serde(default, deserialize_with = "de_string")]
     pub id: String,
@@ -217,8 +235,14 @@ pub struct MemberApi {
     pub username: String,
     #[serde(default, deserialize_with = "de_string")]
     pub status: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub status_display: String,
     #[serde(default, deserialize_with = "de_u32")]
     pub member_index: u32,
+    #[serde(default, deserialize_with = "de_bool")]
+    pub device_lock: bool,
+    #[serde(default)]
+    pub device: Option<MemberDeviceApi>,
     #[serde(default, deserialize_with = "de_opt_string")]
     pub activated_at: Option<String>,
     #[serde(default, deserialize_with = "de_opt_string")]
@@ -288,6 +312,16 @@ pub struct AccountApi {
     pub active_members_count: u32,
     #[serde(default, deserialize_with = "de_opt_u32")]
     pub available_slots: Option<u32>,
+    #[serde(default, deserialize_with = "de_bool")]
+    pub device_lock: bool,
+    #[serde(default, deserialize_with = "de_string")]
+    pub device_name: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub device_platform: String,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub device_bound_at: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub device_cert_expires_at: Option<String>,
     #[serde(default)]
     pub members: Vec<MemberApi>,
 }
@@ -385,6 +419,136 @@ pub struct PurchaseIntentApi {
     pub package_id: String,
     #[serde(default, deserialize_with = "de_bool")]
     pub is_free: bool,
+}
+
+/* ------------------------------------------------------------------ */
+/* Device enrollment / invites (device-lock programme)                */
+/* ------------------------------------------------------------------ */
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct InvitePreviewApi {
+    #[serde(default, deserialize_with = "de_string")]
+    pub status: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub account_name_masked: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub package_name: String,
+    #[serde(default, deserialize_with = "de_i64")]
+    pub traffic_bytes: i64,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub expires_at: Option<String>,
+    #[serde(default, deserialize_with = "de_u32")]
+    pub member_index: u32,
+    #[serde(default, deserialize_with = "de_u32")]
+    pub slots_total: u32,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub account_id: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub member_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct InviteApi {
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub token: Option<String>,
+    #[serde(default, deserialize_with = "de_string")]
+    pub invite_url: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub deep_link: String,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub expires_at: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub member_id: Option<String>,
+    #[serde(default, deserialize_with = "de_u32")]
+    pub member_index: u32,
+    #[serde(default, deserialize_with = "de_string")]
+    pub package_name: String,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub account_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PendingInviteApi {
+    #[serde(default, deserialize_with = "de_string")]
+    pub id: String,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub member: Option<String>,
+    #[serde(default, deserialize_with = "de_string")]
+    pub member_name: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub status: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub token_prefix: String,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub expires_at: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub consumed_at: Option<String>,
+    #[serde(default, deserialize_with = "de_string")]
+    pub device_name: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub platform: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct EnrollmentCredentialApi {
+    #[serde(default, deserialize_with = "de_string")]
+    pub server: String,
+    #[serde(default, deserialize_with = "de_u32")]
+    pub port: u32,
+    #[serde(default, deserialize_with = "de_string")]
+    pub sni: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub password: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub username: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct EnrollmentPackageApi {
+    #[serde(default, deserialize_with = "de_string")]
+    pub id: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub name: String,
+    #[serde(default, deserialize_with = "de_i64")]
+    pub traffic_bytes: i64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct EnrollmentApi {
+    #[serde(default, deserialize_with = "de_string")]
+    pub certificate: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub ca_chain: String,
+    #[serde(default, deserialize_with = "de_string")]
+    pub trojan_url: String,
+    #[serde(default)]
+    pub credential: Option<EnrollmentCredentialApi>,
+    #[serde(default)]
+    pub package: Option<EnrollmentPackageApi>,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub expires_at: Option<String>,
+    #[serde(default, deserialize_with = "de_string")]
+    pub account_id: String,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub member_id: Option<String>,
+    #[serde(default, deserialize_with = "de_string")]
+    pub device_fingerprint: String,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub cert_expires_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct MemberCreateApi {
+    #[serde(default)]
+    pub member: Option<MemberApi>,
+    #[serde(default, deserialize_with = "de_bool")]
+    pub invite_required: bool,
+    #[serde(default)]
+    pub invite: Option<InviteApi>,
+    // Legacy (flag-off) response is a bare MemberCredentialSerializer; handled
+    // by the caller, which falls back to parsing `MemberApi` directly.
 }
 
 /* ------------------------------------------------------------------ */
@@ -500,6 +664,12 @@ pub struct AccountView {
     pub is_legacy_unlimited: bool,
     pub active_members_count: u32,
     pub available_slots: Option<u32>,
+    /// Device-lock programme: locked accounts are certificate-only.
+    pub device_lock: bool,
+    pub device_name: String,
+    pub device_platform: String,
+    pub device_bound_at: Option<String>,
+    pub device_cert_expires_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -514,17 +684,47 @@ pub struct ReserveView {
 
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MemberDeviceView {
+    pub name: String,
+    pub platform: String,
+    pub fingerprint_prefix: Option<String>,
+    pub bound_at: Option<String>,
+    pub last_seen_at: Option<String>,
+    pub cert_expires_at: Option<String>,
+    pub status: String,
+}
+
+impl MemberDeviceView {
+    pub fn from_api(device: &MemberDeviceApi) -> Self {
+        Self {
+            name: device.name.clone(),
+            platform: device.platform.clone(),
+            fingerprint_prefix: device.fingerprint_prefix.clone(),
+            bound_at: device.bound_at.clone(),
+            last_seen_at: device.last_seen_at.clone(),
+            cert_expires_at: device.cert_expires_at.clone(),
+            status: device.status.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MemberView {
     pub id: String,
     pub display_name: String,
     pub username: String,
     pub status: String,
+    pub status_display: String,
     pub member_index: u32,
+    pub device_lock: bool,
+    pub device: Option<MemberDeviceView>,
     pub activated_at: Option<String>,
     pub revoked_at: Option<String>,
     pub mobile: Option<String>,
     pub email: Option<String>,
-    /// Only present on create/rotate responses; never logged.
+    /// Only present on create/rotate responses; never logged. Device-lock
+    /// members never receive one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -538,7 +738,10 @@ impl MemberView {
             display_name: member.display_name.clone(),
             username: member.username.clone(),
             status: member.status.clone(),
+            status_display: member.status_display.clone(),
             member_index: member.member_index,
+            device_lock: member.device_lock,
+            device: member.device.as_ref().map(MemberDeviceView::from_api),
             activated_at: member.activated_at.clone(),
             revoked_at: member.revoked_at.clone(),
             mobile: member.mobile.clone(),
@@ -555,6 +758,18 @@ impl MemberView {
             },
         }
     }
+}
+
+/// Result of `POST members/` on both contract versions:
+/// - device-lock: `{member, invite_required, invite?}` (no password/url)
+/// - legacy: `MemberCredentialSerializer`
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberCreateView {
+    pub member: MemberView,
+    pub invite_required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invite: Option<InviteView>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -660,6 +875,184 @@ pub struct PurchaseIntentView {
     pub plan_id: String,
     pub package_id: String,
     pub is_free: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvitePreviewView {
+    pub status: String,
+    pub account_name_masked: String,
+    pub package_name: String,
+    pub traffic_bytes: i64,
+    pub traffic_display: String,
+    pub expires_at: Option<String>,
+    pub member_index: u32,
+    pub slots_total: u32,
+    pub account_id: String,
+    pub member_id: Option<String>,
+}
+
+impl InvitePreviewView {
+    pub fn from_api(preview: &InvitePreviewApi) -> Self {
+        Self {
+            status: preview.status.clone(),
+            account_name_masked: preview.account_name_masked.clone(),
+            package_name: preview.package_name.clone(),
+            traffic_bytes: preview.traffic_bytes,
+            traffic_display: format_bytes(preview.traffic_bytes),
+            expires_at: preview.expires_at.clone(),
+            member_index: preview.member_index,
+            slots_total: preview.slots_total.max(1),
+            account_id: preview.account_id.clone().unwrap_or_default(),
+            member_id: preview.member_id.clone(),
+        }
+    }
+}
+
+/// Invite shown to the owner after it is minted. `invite_url`/`deep_link`
+/// contain the one-time token and are the only fields the UI may copy/QR.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteView {
+    pub invite_url: String,
+    pub deep_link: String,
+    pub expires_at: Option<String>,
+    pub member_id: Option<String>,
+    pub member_index: u32,
+    pub package_name: String,
+    pub account_id: String,
+}
+
+impl InviteView {
+    pub fn from_api(invite: &InviteApi) -> Self {
+        Self {
+            invite_url: invite.invite_url.clone(),
+            deep_link: invite.deep_link.clone(),
+            expires_at: invite.expires_at.clone(),
+            member_id: invite.member_id.clone(),
+            member_index: invite.member_index,
+            package_name: invite.package_name.clone(),
+            account_id: invite.account_id.clone().unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingInviteView {
+    pub id: String,
+    pub member_id: Option<String>,
+    pub member_name: String,
+    pub status: String,
+    pub token_prefix: String,
+    pub expires_at: Option<String>,
+    pub consumed_at: Option<String>,
+    pub device_name: String,
+    pub platform: String,
+    pub created_at: String,
+}
+
+impl From<&PendingInviteApi> for PendingInviteView {
+    fn from(invite: &PendingInviteApi) -> Self {
+        Self {
+            id: invite.id.clone(),
+            member_id: invite.member.clone(),
+            member_name: invite.member_name.clone(),
+            status: invite.status.clone(),
+            token_prefix: invite.token_prefix.clone(),
+            expires_at: invite.expires_at.clone(),
+            consumed_at: invite.consumed_at.clone(),
+            device_name: invite.device_name.clone(),
+            platform: invite.platform.clone(),
+            created_at: invite.created_at.clone(),
+        }
+    }
+}
+
+/// UI-safe enrollment result. Deliberately omits the generated password and
+/// the `trojan://` link: a locked credential cannot be used without its
+/// certificate, so showing a bearer link would be misleading.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollmentResultView {
+    pub account_id: String,
+    pub member_id: Option<String>,
+    pub identity_id: String,
+    pub device_fingerprint: String,
+    pub fingerprint_prefix: String,
+    pub cert_expires_at: Option<String>,
+    pub expires_at: Option<String>,
+    pub package_name: String,
+    pub traffic_bytes: i64,
+    pub traffic_display: String,
+    pub username: String,
+    pub server: String,
+    pub port: u32,
+    pub sni: String,
+    pub device_name: String,
+    pub platform: String,
+}
+
+impl EnrollmentResultView {
+    pub fn from_api(result: &EnrollmentApi, identity_id: &str) -> Self {
+        let credential = result.credential.clone().unwrap_or_default();
+        let package = result.package.clone().unwrap_or_default();
+        let package_name = if package.name.is_empty() {
+            String::new()
+        } else {
+            package.name.clone()
+        };
+        Self {
+            account_id: result.account_id.clone(),
+            member_id: result.member_id.clone(),
+            identity_id: identity_id.to_string(),
+            device_fingerprint: result.device_fingerprint.clone(),
+            fingerprint_prefix: result.device_fingerprint.chars().take(16).collect(),
+            cert_expires_at: result.cert_expires_at.clone(),
+            expires_at: result.expires_at.clone(),
+            package_name,
+            traffic_bytes: package.traffic_bytes,
+            traffic_display: format_bytes(package.traffic_bytes),
+            username: credential.username.clone(),
+            server: credential.server.clone(),
+            port: credential.port,
+            sni: credential.sni.clone(),
+            device_name: String::new(),
+            platform: String::new(),
+        }
+    }
+}
+
+/// Sanitized local identity for the settings/home badge.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceIdentityView {
+    pub identity_id: String,
+    pub account_id: Option<String>,
+    pub member_id: Option<String>,
+    pub fingerprint_prefix: String,
+    pub cert_expires_at: Option<String>,
+    pub device_name: String,
+    pub platform: String,
+    pub keyring_persistent: bool,
+}
+
+impl DeviceIdentityView {
+    pub fn from_certificate(
+        cert: &crate::device::DeviceCertificate,
+        persistent: bool,
+    ) -> Self {
+        Self {
+            identity_id: cert.identity_id.clone(),
+            account_id: cert.account_id.clone(),
+            member_id: cert.member_id.clone(),
+            fingerprint_prefix: cert.fingerprint_prefix(),
+            cert_expires_at: cert.cert_expires_at.clone(),
+            device_name: cert.device_name.clone(),
+            platform: cert.platform.clone(),
+            keyring_persistent: persistent,
+        }
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -788,6 +1181,11 @@ impl AccountView {
             is_legacy_unlimited: legacy_unlimited,
             active_members_count: members,
             available_slots: available,
+            device_lock: account.device_lock,
+            device_name: account.device_name.clone(),
+            device_platform: account.device_platform.clone(),
+            device_bound_at: account.device_bound_at.clone(),
+            device_cert_expires_at: account.device_cert_expires_at.clone(),
         }
     }
 }
@@ -1030,5 +1428,116 @@ mod tests {
         let view = MemberView::from_api(&member, true);
         assert_eq!(view.password.as_deref(), Some("member-pw"));
         assert!(view.trojan_url.is_some());
+    }
+
+    #[test]
+    fn member_device_summary_is_exposed() {
+        let member = MemberApi {
+            id: "m1".into(),
+            display_name: "Ali".into(),
+            status: "active".into(),
+            device_lock: true,
+            device: Some(MemberDeviceApi {
+                name: "Pixel 8".into(),
+                platform: "android".into(),
+                fingerprint_prefix: Some("a1b2c3d4".into()),
+                cert_expires_at: Some("2028-11-14T14:30:00Z".into()),
+                status: "active".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let view = MemberView::from_api(&member, false);
+        let device = view.device.expect("device");
+        assert_eq!(device.name, "Pixel 8");
+        assert_eq!(device.platform, "android");
+        assert!(view.device_lock);
+        // Locked members never carry a credential in a list response.
+        assert!(view.password.is_none());
+        assert!(view.trojan_url.is_none());
+    }
+
+    #[test]
+    fn locked_account_detail_is_flagged() {
+        let account = AccountApi {
+            id: "acc".into(),
+            status: "active".into(),
+            included_users: Some(2),
+            device_lock: true,
+            device_name: "Pixel 8".into(),
+            device_platform: "android".into(),
+            device_cert_expires_at: Some("2028-11-14T14:30:00Z".into()),
+            ..Default::default()
+        };
+        let detail = AccountDetailView::from_api(&account, now());
+        assert!(detail.base.device_lock);
+        assert_eq!(detail.base.device_name, "Pixel 8");
+        assert_eq!(
+            detail.base.device_cert_expires_at.as_deref(),
+            Some("2028-11-14T14:30:00Z")
+        );
+    }
+
+    #[test]
+    fn invite_preview_formats_traffic_and_defaults_slots() {
+        let preview = InvitePreviewApi {
+            package_name: "HaioGate 100GB".into(),
+            traffic_bytes: 107_374_182_400,
+            slots_total: 0,
+            account_id: Some("acc".into()),
+            member_id: Some("mem".into()),
+            ..Default::default()
+        };
+        let view = InvitePreviewView::from_api(&preview);
+        assert_eq!(view.traffic_display, "100.0 GB");
+        assert_eq!(view.slots_total, 1);
+        assert_eq!(view.member_id.as_deref(), Some("mem"));
+    }
+
+    #[test]
+    fn enrollment_view_never_serializes_the_password() {
+        let result = EnrollmentApi {
+            certificate: "cert".into(),
+            ca_chain: "ca".into(),
+            trojan_url: "trojan://pw@host:443".into(),
+            credential: Some(EnrollmentCredentialApi {
+                server: "host".into(),
+                port: 443,
+                sni: "host".into(),
+                password: "super-secret".into(),
+                username: "u".into(),
+            }),
+            package: Some(EnrollmentPackageApi {
+                name: "HaioGate 100GB".into(),
+                traffic_bytes: 107_374_182_400,
+                ..Default::default()
+            }),
+            account_id: "acc".into(),
+            member_id: Some("mem".into()),
+            device_fingerprint: "a".repeat(64),
+            cert_expires_at: Some("2028-11-14T14:30:00Z".into()),
+            ..Default::default()
+        };
+        let view = EnrollmentResultView::from_api(&result, "m_mem");
+        let json = serde_json::to_string(&view).unwrap();
+        assert!(!json.contains("super-secret"));
+        assert!(!json.contains("trojan://"));
+        assert_eq!(view.fingerprint_prefix.len(), 16);
+        assert_eq!(view.traffic_display, "100.0 GB");
+        assert_eq!(view.identity_id, "m_mem");
+    }
+
+    #[test]
+    fn pending_invite_view_hides_the_token() {
+        let invite = PendingInviteApi {
+            id: "inv".into(),
+            member_name: "Ali".into(),
+            token_prefix: "hgi_ABCD".into(),
+            status: "pending".into(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&PendingInviteView::from(&invite)).unwrap();
+        assert!(json.contains("hgi_ABCD"));
+        assert!(!json.contains("\"token\""));
     }
 }

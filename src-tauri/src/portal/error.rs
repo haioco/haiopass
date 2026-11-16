@@ -22,6 +22,25 @@ pub mod codes {
     pub const UNSUPPORTED: &str = "unsupported";
     pub const OPEN_FAILED: &str = "open_failed";
     pub const STORAGE: &str = "storage";
+
+    /* Device-lock / invite codes (server `code` values, passed through so the
+     * frontend can map them to the copy in the plan §15.3). */
+    pub const INVITE_NOT_FOUND: &str = "invite_not_found";
+    pub const INVITE_EXPIRED: &str = "invite_expired";
+    pub const INVITE_USED: &str = "invite_used";
+    pub const INVITE_REVOKED: &str = "invite_revoked";
+    pub const MEMBER_REVOKED: &str = "member_revoked";
+    pub const MEMBER_NOT_FOUND: &str = "member_not_found";
+    pub const MEMBER_NOT_MANAGEABLE: &str = "not_manageable";
+    pub const SLOT_TAKEN: &str = "slot_taken";
+    pub const SLOTS_FULL: &str = "slots_full";
+    pub const LEGACY_UNLIMITED: &str = "legacy_unlimited";
+    pub const CSR_INVALID: &str = "csr_invalid";
+    pub const DEVICE_ALREADY_BOUND: &str = "device_already_bound";
+    pub const CA_UNAVAILABLE: &str = "ca_unavailable";
+    pub const PROXY_ERROR: &str = "proxy_error";
+    pub const ENROLLMENT_DISABLED: &str = "enrollment_disabled";
+    pub const DEVICE_ENROLLMENT_REQUIRED: &str = "device_enrollment_required";
 }
 
 /// Serializable error returned by every `portal_*` command.
@@ -239,13 +258,113 @@ pub fn parse_drf_error(status: u16, retry_after: Option<u64>, body: &str) -> Por
                 .with_retry_after(seconds)
                 .with_status(status);
             }
+            "invite_not_found" => {
+                error = PortalError::new(codes::INVITE_NOT_FOUND, "لینک دعوت پیدا نشد.")
+                    .with_status(status)
+            }
+            "invite_expired" => {
+                error = PortalError::new(
+                    codes::INVITE_EXPIRED,
+                    "این لینک منقضی شده است. از صاحب کانفیگ لینک جدید بگیرید.",
+                )
+                .with_status(status)
+            }
+            "invite_used" => {
+                error = PortalError::new(
+                    codes::INVITE_USED,
+                    "این لینک قبلاً استفاده شده است. برای دستگاه جدید لینک تازه بگیرید.",
+                )
+                .with_status(status)
+            }
+            "invite_revoked" => {
+                error = PortalError::new(codes::INVITE_REVOKED, "این لینک لغو شده است.")
+                    .with_status(status)
+            }
+            "member_revoked" => {
+                error = PortalError::new(codes::MEMBER_REVOKED, "این کاربر حذف شده است.")
+                    .with_status(status)
+            }
+            "member_not_found" => {
+                error = PortalError::new(codes::MEMBER_NOT_FOUND, "کاربر پیدا نشد.")
+                    .with_status(status)
+            }
+            "not_manageable" => {
+                error = PortalError::new(
+                    codes::MEMBER_NOT_MANAGEABLE,
+                    "این اکانت در وضعیت فعلی قابل مدیریت نیست.",
+                )
+                .with_status(status)
+            }
+            "slot_taken" | "slots_full" => {
+                error = PortalError::new(codes::SLOTS_FULL, "ظرفیت این پلن تکمیل است.")
+                    .with_status(status)
+            }
+            "legacy_unlimited" => {
+                error = PortalError::new(
+                    codes::LEGACY_UNLIMITED,
+                    "این اکانت قدیمی است و کاربر اضافه نمی‌پذیرد.",
+                )
+                .with_status(status)
+            }
+            "csr_invalid" | "invalid_request_id" => {
+                error = PortalError::new(
+                    codes::CSR_INVALID,
+                    "ساخت کلید امن ناموفق بود؛ دوباره تلاش کنید.",
+                )
+                .with_status(status)
+            }
+            "device_already_bound" => {
+                error = PortalError::new(
+                    codes::DEVICE_ALREADY_BOUND,
+                    "این کاربر روی دستگاه دیگری ثبت شده است. ابتدا دستگاه فعلی را حذف کنید.",
+                )
+                .with_status(status)
+            }
+            "ca_unavailable" => {
+                error = PortalError::new(
+                    codes::CA_UNAVAILABLE,
+                    "ثبت دستگاه موقتاً در دسترس نیست؛ بعداً تلاش کنید.",
+                )
+                .with_status(status)
+            }
+            "proxy_error" => {
+                error = PortalError::new(codes::PROXY_ERROR, "خطای موقت سرور. دوباره تلاش کنید.")
+                    .with_status(status)
+            }
+            "enrollment_disabled" => {
+                error = PortalError::new(
+                    codes::ENROLLMENT_DISABLED,
+                    "ثبت دستگاه در حال حاضر فعال نیست.",
+                )
+                .with_status(status)
+            }
             _ => {}
         }
     }
 
     if let Some(detail) = detail {
-        // Never echo provider stack traces; keep the message short and local.
-        if !detail.is_empty() && detail.len() <= 200 && !detail.contains("Traceback") {
+        // Keep the local, code-specific copy for device/invite errors: the
+        // server detail is English and may mention internal states. Other
+        // errors fall back to the (short, sanitized) provider detail.
+        let keep_local = matches!(
+            error.code.as_str(),
+            codes::INVITE_NOT_FOUND
+                | codes::INVITE_EXPIRED
+                | codes::INVITE_USED
+                | codes::INVITE_REVOKED
+                | codes::MEMBER_REVOKED
+                | codes::MEMBER_NOT_FOUND
+                | codes::MEMBER_NOT_MANAGEABLE
+                | codes::SLOTS_FULL
+                | codes::LEGACY_UNLIMITED
+                | codes::CSR_INVALID
+                | codes::DEVICE_ALREADY_BOUND
+                | codes::CA_UNAVAILABLE
+                | codes::PROXY_ERROR
+                | codes::ENROLLMENT_DISABLED
+        );
+        if !keep_local && !detail.is_empty() && detail.len() <= 200 && !detail.contains("Traceback")
+        {
             error.message = detail;
         }
     }
@@ -307,5 +426,50 @@ mod tests {
         let err = parse_drf_error(500, None, "Traceback (most recent call last): ...");
         assert_eq!(err.code, codes::SERVER);
         assert!(!err.message.contains("Traceback"));
+    }
+
+    #[test]
+    fn maps_invite_codes_and_keeps_local_copy() {
+        let err = parse_drf_error(
+            410,
+            None,
+            r#"{"detail":"This invite has expired.","code":"invite_expired"}"#,
+        );
+        assert_eq!(err.code, codes::INVITE_EXPIRED);
+        assert!(err.message.contains("منقضی"));
+        assert!(!err.message.contains("This invite"));
+
+        let used = parse_drf_error(409, None, r#"{"code":"invite_used"}"#);
+        assert_eq!(used.code, codes::INVITE_USED);
+
+        let revoked = parse_drf_error(410, None, r#"{"code":"invite_revoked"}"#);
+        assert_eq!(revoked.code, codes::INVITE_REVOKED);
+
+        let not_found = parse_drf_error(404, None, r#"{"code":"invite_not_found"}"#);
+        assert_eq!(not_found.code, codes::INVITE_NOT_FOUND);
+    }
+
+    #[test]
+    fn maps_enrollment_failures() {
+        assert_eq!(
+            parse_drf_error(400, None, r#"{"code":"csr_invalid"}"#).code,
+            codes::CSR_INVALID
+        );
+        assert_eq!(
+            parse_drf_error(409, None, r#"{"code":"device_already_bound"}"#).code,
+            codes::DEVICE_ALREADY_BOUND
+        );
+        assert_eq!(
+            parse_drf_error(503, None, r#"{"code":"ca_unavailable"}"#).code,
+            codes::CA_UNAVAILABLE
+        );
+        assert_eq!(
+            parse_drf_error(409, None, r#"{"code":"slot_taken"}"#).code,
+            codes::SLOTS_FULL
+        );
+        assert_eq!(
+            parse_drf_error(409, None, r#"{"code":"member_revoked"}"#).code,
+            codes::MEMBER_REVOKED
+        );
     }
 }

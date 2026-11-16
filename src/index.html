@@ -79,6 +79,45 @@
 
         <div class="onboarding-divider"><span data-i18n="hgOr">یا</span></div>
 
+        <div class="card onboarding-path invite-path" id="invitePathCard">
+          <div class="path-head">
+            <span class="path-badge" data-i18n="hgGuest">مهمان</span>
+            <span class="path-title" data-i18n="hgInvitePath">مهمان — لینک دعوت دارم</span>
+          </div>
+          <p class="path-desc" data-i18n="hgInvitePathDesc">
+            با لینک دعوت، همین دستگاه را ثبت کنید؛ نیازی به حساب، کد یکبار مصرف یا احراز هویت نیست.
+          </p>
+          <label class="field-label" for="inviteInput" data-i18n="hgInviteLink">لینک دعوت</label>
+          <input
+            id="inviteInput"
+            class="text-input mono"
+            type="text"
+            dir="ltr"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="haio://join/..."
+            data-i18n-placeholder="hgInvitePlaceholder" />
+          <label class="field-label" for="inviteDeviceName" data-i18n="hgInviteDeviceName">نام دستگاه (اختیاری)</label>
+          <input
+            id="inviteDeviceName"
+            class="text-input"
+            type="text"
+            maxlength="100"
+            autocomplete="off"
+            data-i18n-placeholder="hgInviteDevicePlaceholder" />
+          <div class="config-actions">
+            <span class="config-status" id="inviteStatus" aria-live="polite"></span>
+            <button class="btn ghost" id="invitePreviewBtn" type="button" data-i18n="hgInvitePreview">پیش‌نمایش</button>
+            <button class="btn primary" id="inviteEnrollBtn" type="button" data-i18n="hgInviteEnroll">ثبت این دستگاه</button>
+          </div>
+          <div class="invite-preview hidden" id="invitePreview"></div>
+          <p class="hg-fine" data-i18n="hgInviteDeviceNote">
+            با زدن دکمه زیر، یک کلید امن روی این دستگاه ساخته می‌شود و فقط همین دستگاه می‌تواند وصل شود.
+          </p>
+        </div>
+
+        <div class="onboarding-divider"><span data-i18n="hgOr">یا</span></div>
+
         <div class="card onboarding-path account-path">
           <div class="path-head">
             <span class="path-badge account" data-i18n="hgAccountShort">حساب</span>
@@ -96,6 +135,10 @@
           <span data-i18n="onboardingHint">No access key yet?</span>
           <a href="https://console.haio.ir" target="_blank" rel="noopener">console.haio.ir</a>
         </p>
+
+        <!-- Shown only when onboarding is opened from the app while a config is
+             already saved (guest invite path); returns without deleting it. -->
+        <button class="btn ghost block hidden" id="onboardingReturnBtn" type="button" data-i18n="hgBack">بازگشت</button>
       </section>
 
       <!-- Main application -->
@@ -117,6 +160,7 @@
                   <span class="conn-dot" id="connDot"></span>
                   <span class="conn-text" id="connText" data-i18n="proxyOff">Proxy is off</span>
                 </div>
+                <span class="config-badge hidden" id="activeConfigBadge"></span>
                 <span class="hero-sub" id="domainCount"></span>
               </div>
               <label class="switch switch-lg">
@@ -228,6 +272,7 @@
             </ul>
             <button class="btn primary block" id="hgLoginBtn" type="button" data-i18n="hgLoginWithMobile">ورود با شماره موبایل</button>
             <button class="btn ghost block" id="hgPlansBtn" type="button" data-i18n="hgViewPlans">مشاهده پلن‌ها</button>
+            <button class="btn ghost block" id="hgInviteGuestBtn" type="button" data-i18n="hgInvitePath">مهمان — لینک دعوت دارم</button>
             <p class="hg-fine">
               <span data-i18n="hgGuestHint">مهمان هستید؟ لینک کانفیگ خود را از صفحه خانه وارد کنید.</span>
             </p>
@@ -336,6 +381,7 @@
             </div>
             <div id="hgDetailBody"></div>
             <div class="hg-members-section" id="hgDetailMembers"></div>
+            <div class="hg-members-section" id="hgDetailInvites"></div>
             <div class="hg-detail-actions" id="hgDetailActions"></div>
           </div>
 
@@ -476,6 +522,14 @@
                 <span class="conn-dot connected"></span>
                 <span id="trojanStatusText">Running</span>
               </div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <span class="group-label" data-i18n="hgDeviceSection">Device</span>
+            <div class="card">
+              <p class="setup-desc" id="deviceCardText" data-i18n="hgDeviceNone">No device identity is enrolled on this machine.</p>
+              <button class="btn danger sm hidden" id="btnForgetDevice" type="button" data-i18n="hgDeviceForget">Remove device</button>
             </div>
           </div>
 

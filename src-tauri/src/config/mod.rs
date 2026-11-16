@@ -13,6 +13,11 @@ pub struct TrojanConfig {
     pub server: String,
     pub port: u16,
     pub sni: String,
+    /// Device identity whose certificate/key must be presented during the TLS
+    /// handshake (HaioGate device-lock credentials). The key material itself
+    /// never lives here or in `state.json`; only this opaque id does.
+    #[serde(default)]
+    pub device_identity_id: Option<String>,
 }
 
 /// Where the currently applied VPN config came from.
@@ -74,6 +79,11 @@ pub struct State {
     /// HaioGate account id when `config_source == haiogate`.
     #[serde(default)]
     pub haiogate_account_id: Option<String>,
+    /// Public half of the enrolled device identity: certificate PEM, CA chain,
+    /// fingerprint, ids and expiry. The private key is in the OS keyring; it is
+    /// never serialized into this file.
+    #[serde(default)]
+    pub device_certificate: Option<crate::device::DeviceCertificate>,
 }
 
 fn default_enabled() -> bool { false }
@@ -104,6 +114,7 @@ impl Default for State {
             last_update_at: None,
             config_source: ConfigSource::Manual,
             haiogate_account_id: None,
+            device_certificate: None,
         }
     }
 }
@@ -205,5 +216,40 @@ mod tests {
     #[test]
     fn default_source_is_manual() {
         assert_eq!(ConfigSource::default(), ConfigSource::Manual);
+    }
+
+    #[test]
+    fn legacy_trojan_config_has_no_device_identity() {
+        let config: TrojanConfig = serde_json::from_str(
+            r#"{"password":"pw","server":"h","port":443,"sni":"h"}"#,
+        )
+        .unwrap();
+        assert!(config.device_identity_id.is_none());
+    }
+
+    #[test]
+    fn device_certificate_defaults_to_none_for_old_state_files() {
+        let state: State = serde_json::from_str(r#"{"enabled":false}"#).unwrap();
+        assert!(state.device_certificate.is_none());
+    }
+
+    #[test]
+    fn device_certificate_serializes_public_material_only() {
+        let state = State {
+            device_certificate: Some(crate::device::DeviceCertificate {
+                identity_id: "p_acc".into(),
+                certificate_pem: "-----BEGIN CERTIFICATE-----\nleaf\n-----END CERTIFICATE-----\n".into(),
+                ca_chain_pem: "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n".into(),
+                fingerprint: "a".repeat(64),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"deviceCertificate\""));
+        assert!(json.contains("\"certificatePem\""));
+        // The private key must never appear in state.json, not even as a field.
+        assert!(!json.contains("privateKey"));
+        assert!(!json.contains("PRIVATE KEY"));
     }
 }

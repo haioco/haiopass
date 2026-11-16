@@ -260,6 +260,16 @@ pub async fn get_status(
         "lastUpdateAt": s.last_update_at,
         "configSource": s.config_source,
         "haiogateAccountId": s.haiogate_account_id,
+        "deviceIdentity": s.device_certificate.as_ref().map(|cert| serde_json::json!({
+            "identityId": cert.identity_id,
+            "accountId": cert.account_id,
+            "memberId": cert.member_id,
+            "fingerprintPrefix": cert.fingerprint_prefix(),
+            "certExpiresAt": cert.cert_expires_at,
+            "deviceName": cert.device_name,
+            "platform": cert.platform,
+            "keyringPersistent": state.device.is_persistent(),
+        })),
     }))
 }
 
@@ -288,11 +298,23 @@ pub async fn test_connection(
 
 #[tauri::command]
 pub async fn save_config(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, std::sync::Arc<AppState>>,
     trojan_url: String,
 ) -> Result<serde_json::Value, String> {
     let parsed = crate::config::trojan_url::parse_trojan_url(&trojan_url)
         .ok_or("Invalid access key")?;
+
+    // A manually pasted key is never certificate-bound: delete any enrolled
+    // device key and its public metadata before installing it.
+    crate::portal::commands::clear_local_device_identity(
+        &app_handle,
+        state.inner(),
+        None,
+        None,
+        false,
+    )
+    .await;
 
     let mut config = state.config.write().await;
     config.get_mut().trojan_url = trojan_url;
@@ -301,16 +323,29 @@ pub async fn save_config(
         server: parsed.server,
         port: parsed.port,
         sni: parsed.sni,
+        device_identity_id: None,
     });
+    config.get_mut().device_certificate = None;
     // A manually pasted key always wins over a HaioGate-applied config.
     config.get_mut().config_source = config::ConfigSource::Manual;
     config.get_mut().haiogate_account_id = None;
     config.save().map_err(|e| e.to_string())?;
 
+    // If the tunnel is running, swap in the new credentials immediately.
+    let enabled = config.get().enabled;
+    let saved = config.get().trojan_config.clone();
+    drop(config);
+    if enabled {
+        if let Some(tc) = saved {
+            let trojan = state.trojan.read().await;
+            trojan.set(tc).await;
+        }
+    }
+
     Ok(serde_json::json!({
         "success": true,
-        "server": config.get().trojan_config.as_ref().unwrap().server,
-        "port": config.get().trojan_config.as_ref().unwrap().port,
+        "server": state.config.read().await.get().trojan_config.as_ref().map(|c| c.server.clone()),
+        "port": state.config.read().await.get().trojan_config.as_ref().map(|c| c.port),
     }))
 }
 
@@ -322,14 +357,25 @@ pub async fn delete_config(
     // Disconnect first so the saved config is not in use by a running proxy
     let enabled = { state.config.read().await.get().enabled };
     if enabled {
-        disable_proxy(app_handle).await?;
+        disable_proxy(app_handle.clone()).await?;
     }
+
+    // Deleting the config also deletes the device key + certificate metadata.
+    crate::portal::commands::clear_local_device_identity(
+        &app_handle,
+        state.inner(),
+        None,
+        None,
+        false,
+    )
+    .await;
 
     let mut config = state.config.write().await;
     config.get_mut().trojan_url = String::new();
     config.get_mut().trojan_config = None;
     config.get_mut().config_source = config::ConfigSource::Manual;
     config.get_mut().haiogate_account_id = None;
+    config.get_mut().device_certificate = None;
     config.save().map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({ "success": true }))
