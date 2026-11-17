@@ -375,10 +375,19 @@
             <span class="preset-logo" aria-hidden="true">G</span>
             <span class="preset-copy">
               <strong data-i18n="bypassPresetGoogle">Google web apps</strong>
-              <small id="googlePresetDesc" data-i18n="bypassPresetGoogleDesc">Search, Gmail, Drive, Calendar, static assets and ads go direct. Gemini and Google AI stay on the tunnel.</small>
+              <small id="googlePresetDesc" data-i18n="bypassPresetGoogleDesc">Search, Gmail, Drive, Calendar and ads go direct. Google AI hosts (Gemini, Flow) stay on the tunnel.</small>
             </span>
             <span class="preset-action" id="googlePresetAction">Add</span>
           </button>
+
+          <div class="ai-warn hidden" id="aiDirectWarn" role="status">
+            <span class="ai-warn-icon" aria-hidden="true">!</span>
+            <span class="ai-warn-copy">
+              <strong data-i18n="bypassAiWarnTitle">Gemini and Flow break this way</strong>
+              <small data-i18n="bypassAiWarnDesc">These hosts go direct, so Google sees your own IP and the AI pages lose their images. Remove them to route them through the tunnel again.</small>
+            </span>
+            <button class="preset-action" id="aiDirectFix" type="button" data-i18n="bypassAiWarnFix">Fix</button>
+          </div>
 
           <form class="add-row" id="bypassForm">
             <input

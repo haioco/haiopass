@@ -57,38 +57,47 @@ const shareWarnCancel = $('shareWarnCancel');
 const btnDeleteConfig = $('btnDeleteConfig');
 const googlePreset = $('googlePreset');
 const googlePresetAction = $('googlePresetAction');
+const aiDirectWarn = $('aiDirectWarn');
+const aiDirectFix = $('aiDirectFix');
 
 const LANG_KEY = 'haiobypass:lang';
 
-// Curated Google web domains that are safe to route directly. AI and Cloud
-// endpoints (gemini.google.com, aistudio.google.com, generativelanguage...)
-// stay on the tunnel so anti-sanction services keep working.
+// Curated Google web domains that are safe to route directly. Only product
+// surfaces whose pages do not depend on Google AI assets belong here; the AI
+// hosts below must always stay on the tunnel so anti-sanction keeps working.
 const GOOGLE_PRESET_DOMAINS = Object.freeze([
-  'accounts.google.com',
-  'apis.google.com',
   'books.google.com',
   'calendar.google.com',
   'docs.google.com',
   'doubleclickbygoogle.com',
   'drive.google.com',
   'earth.google.com',
-  'fonts.googleapis.com',
   'google-analytics.com',
   'googleadservices.com',
   'googlesyndication.com',
-  'googleusercontent.com',
   'googletagmanager.com',
-  'gstatic.com',
   'keep.google.com',
   'mail.google.com',
   'maps.google.com',
   'news.google.com',
   'photos.google.com',
-  'play.google.com',
   'scholar.google.com',
   'sheets.google.com',
   'slides.google.com',
   'translate.google.com',
+]);
+
+// Hosts Gemini / Flow / AI Studio depend on. They serve the AI pages' own
+// scripts and images and they answer the region-eligibility check, so routing
+// them direct makes Google see the Iranian IP ("Gemini isn't currently
+// supported in your country") and drops the images behind the national filter.
+const GOOGLE_AI_TUNNEL_ONLY = Object.freeze([
+  'accounts.google.com',
+  'apis.google.com',
+  'fonts.googleapis.com',
+  'googleusercontent.com',
+  'gstatic.com',
+  'play.google.com',
   'www.google.com',
 ]);
 const VALID_TABS = ['home', 'haiogate', 'bypass', 'settings'];
@@ -860,6 +869,22 @@ function updateGooglePreset() {
     : t.bypassPresetAdd.replace('{n}', String(missing.length));
 }
 
+// Any bypass entry that covers (or is covered by) an AI host sends Gemini's
+// assets and its eligibility check straight out from the customer's own IP.
+function directAiHosts() {
+  return bypassDomains.filter((entry) =>
+    GOOGLE_AI_TUNNEL_ONLY.some(
+      (host) =>
+        entry === host || entry.endsWith(`.${host}`) || host.endsWith(`.${entry}`)
+    )
+  );
+}
+
+function renderAiDirectWarn() {
+  if (!aiDirectWarn) return;
+  aiDirectWarn.classList.toggle('hidden', directAiHosts().length === 0);
+}
+
 function bypassEmptyState(message, hint) {
   const empty = document.createElement('div');
   empty.className = 'bypass-empty';
@@ -923,6 +948,7 @@ function renderBypassDomains(domains) {
     : t.bypassNone;
 
   updateGooglePreset();
+  renderAiDirectWarn();
 
   const query = (bypassSearch?.value || '').trim().toLowerCase();
   const filtered = query
@@ -1031,10 +1057,32 @@ googlePreset.addEventListener('click', async () => {
   }
 });
 
+aiDirectFix?.addEventListener('click', async () => {
+  const t = translations[currentLang];
+  const drop = new Set(directAiHosts());
+  if (drop.size === 0) return;
+
+  aiDirectFix.disabled = true;
+  try {
+    const kept = bypassDomains.filter((domain) => !drop.has(domain));
+    const res = await invoke('set_bypass_domains', { domains: kept });
+    showError(null);
+    if (Array.isArray(res?.domains)) {
+      renderBypassDomains(res.domains);
+    } else {
+      await loadBypassDomains();
+    }
+  } catch (error) {
+    showError(String(error) || t.bypassRemoveFailed);
+  } finally {
+    aiDirectFix.disabled = false;
+    renderAiDirectWarn();
+  }
+});
+
 /* ------------------------------------------------------------------ */
 /* Domain refresh                                                      */
 /* ------------------------------------------------------------------ */
-
 btnRefreshDomains.addEventListener('click', async () => {
   const t = translations[currentLang];
   const now = Date.now();
